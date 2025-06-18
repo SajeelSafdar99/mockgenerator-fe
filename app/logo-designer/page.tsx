@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,7 +19,6 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import {
   Square,
   Circle,
@@ -36,22 +34,21 @@ import {
   AlignRight,
   ArrowLeft,
   Maximize2,
+  Grid3X3,
   Layers,
-  ChevronUp,
-  ChevronDown,
   Eye,
   EyeOff,
   Lock,
   Unlock,
   MoreHorizontal,
-  Grid3X3,
-  RotateCcw,
-  Trash2,
+  ChevronUp,
+  Trash2, ChevronDown, RotateCcw,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "@/hooks/use-toast"
 import { useAuth } from "@/lib/auth-context"
 import LoginModal from "@/components/login-modal"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem,  DropdownMenuTrigger } from "@radix-ui/react-dropdown-menu"
 
 // Enhanced element interface for logo designer
 interface DesignElement {
@@ -93,6 +90,36 @@ const LOGO_CANVAS_PRESETS = {
 }
 
 export default function LogoDesignerPage() {
+  const { user, loading } = useAuth()
+  const [showAuthModal, setShowAuthModal] = useState(false)
+
+  // Add this near the top of the component with other refs
+  const userRef = useRef(user)
+
+  // Add this useEffect to keep the ref updated
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  // Debug logging for auth state changes
+  useEffect(() => {
+    console.log("🎨 LogoDesigner - Auth state changed:", { user, loading })
+  }, [user, loading])
+
+  // Check if user should see auth modal (but don't change layout)
+  useEffect(() => {
+    console.log("🎨 LogoDesigner - Checking if should show modal:", { loading, user })
+    if (!loading) {
+      if (!user) {
+        console.log("🎨 LogoDesigner - No user, showing modal")
+        setShowAuthModal(true)
+      } else {
+        console.log("🎨 LogoDesigner - User found, hiding modal")
+        setShowAuthModal(false)
+      }
+    }
+  }, [user, loading])
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [elements, setElements] = useState<DesignElement[]>([])
   const [selectedElementIndex, setSelectedElementIndex] = useState<number | null>(null)
@@ -115,8 +142,6 @@ export default function LogoDesignerPage() {
   const [mouseDown, setMouseDown] = useState(false)
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 })
   const [loadedImages, setLoadedImages] = useState<Map<string, HTMLImageElement>>(new Map())
-  const { user } = useAuth()
-  const [showLoginModal, setShowLoginModal] = useState(false)
 
   // Text input state
   const [textInput, setTextInput] = useState("")
@@ -695,9 +720,9 @@ export default function LogoDesignerPage() {
   }
 
   const downloadLogo = () => {
-    // Check if user is logged in
+    // Check if user is logged in - if not, show modal
     if (!user) {
-      setShowLoginModal(true)
+      setShowAuthModal(true)
       return
     }
 
@@ -735,6 +760,7 @@ export default function LogoDesignerPage() {
       description: "Your logo has been downloaded successfully.",
     })
   }
+
   // Handle canvas interactions
   const getCanvasCoordinates = (e: React.MouseEvent) => {
     const canvas = canvasRef.current
@@ -870,6 +896,38 @@ export default function LogoDesignerPage() {
     setDragOffset({ x: 0, y: 0 })
   }
 
+  const handleAuthModalClose = (open: boolean) => {
+    console.log("🎨 LogoDesigner - Modal close handler:", { open, user, loading })
+
+    // Only redirect if modal is being closed and we're sure it wasn't a successful login
+    if (!open && !loading) {
+      // Use setTimeout to allow React state updates to complete
+      setTimeout(() => {
+        // Get the current user state from the ref (not closure)
+        const currentUser = userRef.current
+        console.log("🎨 LogoDesigner - Delayed check for redirect:", { currentUser })
+
+        if (!currentUser) {
+          console.log("🎨 LogoDesigner - Redirecting to home")
+          window.location.href = "/"
+        } else {
+          console.log("🎨 LogoDesigner - User found, staying on page")
+        }
+      }, 200)
+    }
+    setShowAuthModal(open)
+  }
+
+  const handleAuthSuccess = () => {
+    console.log("🎨 LogoDesigner - Auth success handler")
+    // User successfully logged in - close modal and stay on page
+    setShowAuthModal(false)
+    toast({
+      title: "Welcome!",
+      description: "You can now use all features of the Logo Designer.",
+    })
+  }
+  // Always render the full layout - authentication is handled via modal only
   return (
       <div className="flex flex-col min-h-screen">
         <header className="border-b p-4 bg-white">
@@ -972,22 +1030,6 @@ export default function LogoDesignerPage() {
               <Button onClick={downloadLogo} className="gap-2">
                 <Download className="h-4 w-4" /> Download Logo
               </Button>
-              <LoginModal
-                  open={showLoginModal}
-                  onOpenChange={setShowLoginModal}
-                  onSuccess={() => {
-                    toast({
-                      title: "Welcome!",
-                      description: "You can now download your logo design.",
-                    })
-                    // Automatically trigger download after successful login
-                    setTimeout(() => {
-                      if (user) {
-                        downloadLogo()
-                      }
-                    }, 300)
-                  }}
-              />
             </div>
           </div>
         </header>
@@ -1610,6 +1652,8 @@ export default function LogoDesignerPage() {
             </div>
           </div>
         </main>
+        <LoginModal open={showAuthModal} onOpenChange={handleAuthModalClose} onSuccess={handleAuthSuccess} />
       </div>
+
   )
 }

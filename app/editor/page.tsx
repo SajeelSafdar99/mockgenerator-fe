@@ -139,8 +139,35 @@ export default function EditorPage() {
   })
   const containerRef = useRef<HTMLDivElement>(null)
   const isMobile = useMobile()
-  const { user } = useAuth()
-  const [showLoginModal, setShowLoginModal] = useState(false)
+  const { user, loading } = useAuth()
+  const [showAuthModal, setShowAuthModal] = useState(false)
+
+  // Add this near the top of the component with other refs
+  const userRef = useRef(user)
+
+  // Add this useEffect to keep the ref updated
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
+
+  // Debug logging for auth state changes
+  useEffect(() => {
+    console.log("🎨 Editor - Auth state changed:", { user, loading })
+  }, [user, loading])
+
+  // Check if user should see auth modal (but don't change layout)
+  useEffect(() => {
+    console.log("🎨 Editor - Checking if should show modal:", { loading, user })
+    if (!loading) {
+      if (!user) {
+        console.log("🎨 Editor - No user, showing modal")
+        setShowAuthModal(true)
+      } else {
+        console.log("🎨 Editor - User found, hiding modal")
+        setShowAuthModal(false)
+      }
+    }
+  }, [user, loading])
   // Template data mapping
   const templateImages: Record<string, string> = {
     box: "/product-box.png??key=lkdoe",
@@ -917,6 +944,42 @@ export default function EditorPage() {
     ))
   }
 
+  const handleAuthModalClose = (open: boolean) => {
+    // Only redirect if modal is being closed and we're sure it wasn't a successful login
+    if (!open && !loading) {
+      // Use setTimeout to allow React state updates to complete
+      setTimeout(() => {
+        // Get the current user state from the ref (not closure)
+        const currentUser = userRef.current
+        console.log("📝 Editor - Delayed check for redirect:", { currentUser })
+
+        if (!currentUser) {
+          console.log("📝 Editor - Redirecting to home")
+          window.location.href = "/"
+        } else {
+          console.log("📝 Editor - User found, staying on page")
+        }
+      }, 200)
+    }
+    setShowLoginModal(open)
+  }
+
+  const handleAuthSuccess = () => {
+    console.log("📝 Editor - Auth success handler")
+    // User successfully logged in - close modal and stay on page
+    setShowLoginModal(false)
+    toast({
+      title: "Welcome!",
+      description: "You can now download your mockup design.",
+    })
+    // Automatically trigger download after successful login
+    setTimeout(() => {
+      if (userRef.current) {
+        handleDownload()
+      }
+    }, 300)
+  }
+
   return (
     <div className="flex flex-col min-h-screen">
       <header className="border-b p-4 bg-white">
@@ -1020,22 +1083,6 @@ export default function EditorPage() {
                 </>
               )}
             </Button>
-            <LoginModal
-                open={showLoginModal}
-                onOpenChange={setShowLoginModal}
-                onSuccess={() => {
-                  toast({
-                    title: "Welcome!",
-                    description: "You can now download your logo design.",
-                  })
-                  // Automatically trigger download after successful login
-                  setTimeout(() => {
-                    if (user) {
-                      handleDownload()
-                    }
-                  }, 300)
-                }}
-            />
             <Button variant="outline" size="icon" onClick={toggleRightPanel}>
               <PanelRight className="h-4 w-4" />
             </Button>
@@ -1987,6 +2034,8 @@ export default function EditorPage() {
           )}
         </div>
       </main>
+      <LoginModal open={showAuthModal} onOpenChange={handleAuthModalClose} onSuccess={handleAuthSuccess} />
     </div>
+
   )
 }
