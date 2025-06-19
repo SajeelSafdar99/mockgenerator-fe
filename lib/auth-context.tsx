@@ -17,6 +17,7 @@ interface AuthContextType {
     logout: () => Promise<void>
     loading: boolean
     error: string | null
+    getAuthToken: () => string | null
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -29,6 +30,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // API base URL - replace with your Vercel deployment URL
     const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+    const getAuthToken = () => {
+        if (typeof window === "undefined") return null
+        return localStorage.getItem("accessToken")
+    }
 
     // Debug logging for user state changes
     useEffect(() => {
@@ -98,7 +103,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return false
             }
 
-            const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+            const response = await fetch(`${API_BASE_URL}/api/auth?action=refresh`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -130,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(true)
             setError(null)
 
-            const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+            const response = await fetch(`${API_BASE_URL}/api/auth?action=login`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -173,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setLoading(true)
             setError(null)
 
-            const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
+            const response = await fetch(`${API_BASE_URL}/api/auth?action=signup`, {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -215,7 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
             const refreshToken = localStorage.getItem("refreshToken")
             if (refreshToken) {
-                await fetch(`${API_BASE_URL}/api/auth/logout`, {
+                await fetch(`${API_BASE_URL}/api/auth?action=logout`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
@@ -237,7 +242,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Debug the current state
     console.log("🔍 AuthProvider render - user:", user, "loading:", loading)
 
-    return <AuthContext.Provider value={{ user, login, signup, logout, loading, error }}>{children}</AuthContext.Provider>
+    return (
+        <AuthContext.Provider
+            value={{
+                user,
+                login,
+                signup,
+                logout,
+                loading,
+                error,
+                getAuthToken,
+            }}
+        >
+            {children}
+        </AuthContext.Provider>
+    )
 }
 
 export function useAuth() {

@@ -38,6 +38,11 @@ import {
   AlignJustify,
   Grid3X3,
   MoreHorizontal,
+  Clock,
+  Save,
+  Trash,
+  Calendar,
+  FileText,
 } from "lucide-react"
 import { useIsMobile as useMobile } from "@/hooks/use-mobile"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -59,14 +64,15 @@ import {
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import {useAuth} from "@/lib/auth-context";
-import LoginModal from "@/components/login-modal";
+import { useAuth } from "@/lib/auth-context"
+import LoginModal from "@/components/login-modal"
 
 // Define logo data structure with enhanced properties
 interface LogoData {
   id: string
   file: File | null
   url: string | null
+  originalUrl?: string // Store the original URL for AI-generated logos
   position: { x: number; y: number }
   size: number
   rotation: number
@@ -80,6 +86,22 @@ interface LogoData {
     contrast: number
     hue: number
     saturation: number
+  }
+}
+
+// Design data structure for saving/loading
+interface DesignData {
+  id: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  thumbnail?: string
+  data: {
+    selectedTemplate: string
+    logos: LogoData[]
+    canvasSize: { width: number; height: number }
+    waxEffect: any
+    templateColor: string
   }
 }
 
@@ -135,12 +157,25 @@ export default function EditorPage() {
     rotation: 45,
     spacing: 100,
     pattern: "logo",
-    size: 50, // Add size control
+    size: 50,
   })
   const containerRef = useRef<HTMLDivElement>(null)
   const isMobile = useMobile()
-  const { user, loading } = useAuth()
+  const { user, loading, getAuthToken } = useAuth()
   const [showAuthModal, setShowAuthModal] = useState(false)
+  const [showLoginModal, setShowLoginModal] = useState(false)
+
+  // Design History & Recent Projects
+  const [designHistory, setDesignHistory] = useState<DesignData[]>([])
+  const [showHistoryModal, setShowHistoryModal] = useState(false)
+  const [currentDesignName, setCurrentDesignName] = useState("")
+  const [showSaveDialog, setShowSaveDialog] = useState(false)
+
+  const [isSaving, setIsSaving] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [currentDesignId, setCurrentDesignId] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
 
   // Add this near the top of the component with other refs
   const userRef = useRef(user)
@@ -168,6 +203,7 @@ export default function EditorPage() {
       }
     }
   }, [user, loading])
+
   // Template data mapping
   const templateImages: Record<string, string> = {
     box: "/product-box.png??key=lkdoe",
@@ -189,10 +225,13 @@ export default function EditorPage() {
   // Create a new logo with enhanced properties
   const createNewLogo = (file: File | null = null, url: string | null = null): LogoData => {
     const newZIndex = Math.max(...logos.map((l) => l.zIndex), 0) + 1
+    console.log("🎨 Creating new logo:", { file: file?.name, url, newZIndex })
+
     return {
       id: Date.now().toString(),
       file,
       url,
+      originalUrl: url, // Store the original URL
       position: { x: 50, y: 50 },
       size: 30,
       rotation: 0,
@@ -212,8 +251,13 @@ export default function EditorPage() {
 
   // Add a new logo
   const addLogo = (file: File | null = null, url: string | null = null) => {
+    console.log("🎨 Adding logo:", { file: file?.name, url })
     const newLogo = createNewLogo(file, url)
-    setLogos([...logos, newLogo])
+    setLogos((prevLogos) => {
+      const updatedLogos = [...prevLogos, newLogo]
+      console.log("🎨 Updated logos array:", updatedLogos)
+      return updatedLogos
+    })
     setSelectedLogoIndex(logos.length)
     setShowWelcome(false)
     toast({
@@ -405,44 +449,64 @@ export default function EditorPage() {
     })
   }
 
-  // Update logo URL when file changes
+  // Update logo URL when file changes - FIXED VERSION
   useEffect(() => {
+    console.log("🎨 Logo URL effect triggered, logos count:", logos.length)
+
     logos.forEach((logo, index) => {
       if (logo.file && !logo.url) {
+        console.log(`🎨 Processing logo ${index} with file:`, logo.file.name)
+
         const url = URL.createObjectURL(logo.file)
-        const updatedLogos = [...logos]
-        updatedLogos[index] = { ...logo, url }
-        setLogos(updatedLogos)
+        console.log(`🎨 Created blob URL for logo ${index}:`, url)
+
+        setLogos((prevLogos) => {
+          const updatedLogos = [...prevLogos]
+          updatedLogos[index] = { ...logo, url }
+          console.log(`🎨 Updated logo ${index} with URL:`, updatedLogos[index])
+          return updatedLogos
+        })
 
         // Calculate aspect ratio for uploaded images
         const img = new window.Image()
         img.onload = () => {
           const aspectRatio = img.width / img.height
-          const newLogos = [...updatedLogos]
-          newLogos[index] = { ...newLogos[index], aspectRatio }
-          setLogos(newLogos)
+          console.log(`🎨 Logo ${index} aspect ratio calculated:`, aspectRatio)
+
+          setLogos((prevLogos) => {
+            const newLogos = [...prevLogos]
+            if (newLogos[index]) {
+              newLogos[index] = { ...newLogos[index], aspectRatio }
+              console.log(`🎨 Updated logo ${index} with aspect ratio:`, newLogos[index])
+            }
+            return newLogos
+          })
+        }
+        img.onerror = (error) => {
+          console.error(`🎨 Error loading image for logo ${index}:`, error)
         }
         img.src = url
       }
     })
 
-    // Cleanup URLs when component unmounts
+    // Cleanup function - only cleanup blob URLs that are no longer in use
     return () => {
-      logos.forEach((logo) => {
-        if (logo.url && logo.url.startsWith("blob:")) {
-          URL.revokeObjectURL(logo.url)
-        }
-      })
+      // This cleanup will run when logos array changes or component unmounts
+      // We should be careful not to revoke URLs that are still being used
     }
-  }, [logos])
+  }, [logos.length]) // Only depend on logos.length to avoid infinite loops
 
-  // Handle file upload
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Enhanced file upload with backend storage - FIXED VERSION
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("🎨 File upload triggered")
+
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0]
+      console.log("🎨 File selected:", { name: file.name, size: file.size, type: file.type })
 
       // Validate file type
       if (!file.type.startsWith("image/")) {
+        console.error("🎨 Invalid file type:", file.type)
         toast({
           title: "Invalid File Type",
           description: "Please upload a PNG, JPG, or other image file.",
@@ -453,6 +517,7 @@ export default function EditorPage() {
 
       // Validate file size (max 10MB)
       if (file.size > 10 * 1024 * 1024) {
+        console.error("🎨 File too large:", file.size)
         toast({
           title: "File Too Large",
           description: "Please upload an image smaller than 10MB.",
@@ -461,14 +526,103 @@ export default function EditorPage() {
         return
       }
 
-      const objectUrl = URL.createObjectURL(file)
-      addLogo(file, objectUrl)
+      if (!user) {
+        console.log("🎨 No user authenticated")
+        toast({
+          title: "Authentication Required",
+          description: "Please log in to upload images.",
+          variant: "destructive",
+        })
+        setShowAuthModal(true)
+        return
+      }
+
+      setIsUploading(true)
+
+      try {
+        // Create form data
+        const formData = new FormData()
+        formData.append("image", file)
+        console.log("🎨 FormData created with image")
+
+        // Upload to backend directly
+        const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+        console.log("🎨 Using backend URL:", BACKEND_URL)
+        const uploadUrl = `${BACKEND_URL}/api/uploads/upload`
+
+        console.log("🎨 Uploading to:", uploadUrl)
+
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getAuthToken()}`,
+          },
+          body: formData,
+        })
+
+        console.log("🎨 Upload response status:", response.status)
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          console.error("🎨 Upload failed:", errorData)
+          throw new Error(errorData.error || "Upload failed")
+        }
+
+        const uploadData = await response.json()
+        console.log("🎨 Upload successful:", uploadData)
+
+        // Extract the correct URL from the response
+        let imageUrl = null
+        if (uploadData.data && uploadData.data.url) {
+          imageUrl = uploadData.data.url
+        } else if (uploadData.data && uploadData.data.fileUrl) {
+          imageUrl = uploadData.data.fileUrl
+        } else if (uploadData.url) {
+          imageUrl = uploadData.url
+        } else if (uploadData.fileUrl) {
+          imageUrl = uploadData.fileUrl
+        }
+
+        // Transform localhost URLs to use the correct backend URL
+        if (imageUrl && imageUrl.includes("localhost:3001")) {
+          imageUrl = imageUrl.replace("http://localhost:3001", BACKEND_URL)
+          console.log("🎨 Transformed localhost URL to:", imageUrl)
+        }
+
+        console.log("🎨 Final image URL:", imageUrl)
+
+        if (!imageUrl) {
+          console.error("🎨 No URL found in upload response:", uploadData)
+          throw new Error("No image URL returned from server")
+        }
+
+        // Add logo with permanent URL
+        addLogo(null, imageUrl)
+
+        toast({
+          title: "Upload Successful!",
+          description: "Your image has been uploaded and added to the canvas.",
+        })
+      } catch (error) {
+        console.error("🎨 Upload error:", error)
+
+        // Fallback: create blob URL for immediate use
+        console.log("🎨 Using fallback blob URL")
+        addLogo(file, null)
+
+        toast({
+          title: "Upload Failed - Using Local Copy",
+          description: "Image added locally. Save your design to try uploading again.",
+          variant: "default",
+        })
+      } finally {
+        setIsUploading(false)
+      }
 
       // Reset the input value so the same file can be selected again if needed
       e.target.value = ""
     }
   }
-
   // Enhanced drag and resize handlers
   const handleDragStart = (e: React.MouseEvent | React.TouchEvent, logoIndex: number) => {
     if (logos[logoIndex].locked) return
@@ -746,9 +900,9 @@ export default function EditorPage() {
 
           // Sort logos by z-index and render visible ones
           const sortedLogos = logos
-            .map((logo, index) => ({ logo, index }))
-            .filter(({ logo }) => logo.visible && logo.url)
-            .sort((a, b) => a.logo.zIndex - b.logo.zIndex)
+              .map((logo, index) => ({ logo, index }))
+              .filter(({ logo }) => logo.visible && logo.url)
+              .sort((a, b) => a.logo.zIndex - b.logo.zIndex)
 
           let processedLogos = 0
 
@@ -850,10 +1004,10 @@ export default function EditorPage() {
       const logoHeight = logoWidth / logo.aspectRatio
 
       if (
-        x >= logoX - logoWidth / 2 &&
-        x <= logoX + logoWidth / 2 &&
-        y >= logoY - logoHeight / 2 &&
-        y <= logoY + logoHeight / 2
+          x >= logoX - logoWidth / 2 &&
+          x <= logoX + logoWidth / 2 &&
+          y >= logoY - logoHeight / 2 &&
+          y <= logoY + logoHeight / 2
       ) {
         clickedLogoIndex = index
         break
@@ -864,7 +1018,7 @@ export default function EditorPage() {
     if (e.ctrlKey || e.metaKey) {
       if (clickedLogoIndex !== -1) {
         setSelectedLogos((prev) =>
-          prev.includes(clickedLogoIndex) ? prev.filter((i) => i !== clickedLogoIndex) : [...prev, clickedLogoIndex],
+            prev.includes(clickedLogoIndex) ? prev.filter((i) => i !== clickedLogoIndex) : [...prev, clickedLogoIndex],
         )
       }
     } else {
@@ -883,30 +1037,79 @@ export default function EditorPage() {
   const toggleRightPanel = () => setShowRightPanel(!showRightPanel)
 
   // AI logo generation
-  const generateLogoWithAI = () => {
+  const generateLogoWithAI = async () => {
     if (!aiPrompt.trim()) return
 
     setIsGenerating(true)
 
-    setTimeout(() => {
-      const newGeneratedLogos = [
-        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 1")}`,
-        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 2")}`,
-        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 3")}`,
-      ]
+    try {
+      // Direct Unsplash API call
+      const response = await fetch(
+          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(aiPrompt + " logo design")}&per_page=9&orientation=squarish&client_id=${process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY}`,
+          {
+            headers: {
+              "Accept-Version": "v1",
+            },
+          },
+      )
 
-      setGeneratedLogos(newGeneratedLogos)
+      if (!response.ok) {
+        throw new Error(`Unsplash API error: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (data.results && data.results.length > 0) {
+        const newGeneratedLogos = data.results.map((photo: any) => photo.urls.regular)
+        setGeneratedLogos(newGeneratedLogos)
+      } else {
+        // Fallback to placeholder images
+        const fallbackLogos = [
+          `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 1")}`,
+          `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 2")}`,
+          `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 3")}`,
+        ]
+        setGeneratedLogos(fallbackLogos)
+      }
+
       setIsGenerating(false)
 
       toast({
         title: "AI Logos Generated!",
         description: "Click on any generated logo to add it to your mockup.",
       })
-    }, 2000)
+    } catch (error) {
+      console.error("Error generating logos:", error)
+      setIsGenerating(false)
+
+      // Fallback to placeholder images if API fails
+      const fallbackLogos = [
+        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 1")}`,
+        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 2")}`,
+        `/placeholder.svg?height=200&width=200&query=${encodeURIComponent(aiPrompt + " logo design 3")}`,
+      ]
+
+      setGeneratedLogos(fallbackLogos)
+
+      toast({
+        title: "Using Placeholder Images",
+        description: "Unable to fetch from Unsplash API. Using placeholder images instead.",
+        variant: "destructive",
+      })
+    }
   }
 
   const addGeneratedLogo = (url: string) => {
-    addLogo(null, url)
+    console.log("🎨 Adding generated logo:", url)
+    const newLogo = createNewLogo(null, url)
+    newLogo.originalUrl = url // Ensure we store the original URL
+    setLogos([...logos, newLogo])
+    setSelectedLogoIndex(logos.length)
+    setShowWelcome(false)
+    toast({
+      title: "Logo Added!",
+      description: "Your AI-generated logo has been added to the canvas.",
+    })
   }
 
   // Set up event listeners
@@ -920,6 +1123,25 @@ export default function EditorPage() {
     }
   }, [])
 
+  // Load design history on component mount
+  useEffect(() => {
+    if (user) {
+      loadDesignHistory()
+    }
+  }, [user])
+
+  // Auto-save current design state every 30 seconds
+  useEffect(() => {
+    const autoSaveInterval = setInterval(() => {
+      if (logos.length > 0 && user && currentDesignId) {
+        // Only auto-save if we have an existing design
+        saveCurrentDesign(currentDesignName || "Auto-save")
+      }
+    }, 30000) // 30 seconds
+
+    return () => clearInterval(autoSaveInterval)
+  }, [logos, selectedTemplate, canvasSize, waxEffect, user, currentDesignId, currentDesignName])
+
   // Get CSS filter string for a logo
   const getLogoFilterStyle = (filters: LogoData["filters"]) => {
     return `brightness(${filters.brightness}%) contrast(${filters.contrast}%) hue-rotate(${filters.hue}deg) saturate(${filters.saturation}%)`
@@ -932,15 +1154,15 @@ export default function EditorPage() {
     const handles = ["nw", "ne", "sw", "se", "n", "s", "e", "w"]
 
     return handles.map((handle) => (
-      <div
-        key={handle}
-        className={`absolute w-2 h-2 bg-primary border border-white cursor-${handle}-resize`}
-        style={{
-          top: handle.includes("n") ? "-4px" : handle.includes("s") ? "calc(100% - 4px)" : "calc(50% - 4px)",
-          left: handle.includes("w") ? "-4px" : handle.includes("e") ? "calc(100% - 4px)" : "calc(50% - 4px)",
-        }}
-        onMouseDown={(e) => handleResizeStart(e, index, handle)}
-      />
+        <div
+            key={handle}
+            className={`absolute w-2 h-2 bg-primary border border-white cursor-${handle}-resize`}
+            style={{
+              top: handle.includes("n") ? "-4px" : handle.includes("s") ? "calc(100% - 4px)" : "calc(50% - 4px)",
+              left: handle.includes("w") ? "-4px" : handle.includes("e") ? "calc(100% - 4px)" : "calc(50% - 4px)",
+            }}
+            onMouseDown={(e) => handleResizeStart(e, index, handle)}
+        />
     ))
   }
 
@@ -980,1062 +1202,1651 @@ export default function EditorPage() {
     }, 300)
   }
 
+  // Design History Functions - FIXED VERSION
+  const saveCurrentDesign = async (name?: string) => {
+    if (!user) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to save your design.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const designName = name || currentDesignName || `Design ${Date.now()}`
+    setIsSaving(true)
+    setSaveError(null)
+
+    try {
+      // Prepare logos data for saving - only save permanent URLs
+      const logosToSave = logos
+          .filter((logo) => logo.url && !logo.url.startsWith("blob:")) // Filter out blob URLs
+          .map((logo) => ({
+            ...logo,
+            file: null, // Don't save file objects
+            url: logo.originalUrl || logo.url, // Use original URL
+            originalUrl: logo.originalUrl || logo.url,
+          }))
+
+      console.log("🎨 Saving design with logos:", logosToSave)
+
+      const designData = {
+        name: designName,
+        data: {
+          selectedTemplate,
+          logos: logosToSave,
+          canvasSize,
+          waxEffect,
+          templateColor,
+        },
+      }
+
+      // Add ID for updates
+      if (currentDesignId) {
+        ;(designData as any).id = currentDesignId
+      }
+
+      // Try to save to backend first
+      try {
+        const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+        const endpoint = currentDesignId
+            ? `${BACKEND_URL}/api/designs/update?designId=${currentDesignId}`
+            : `${BACKEND_URL}/api/designs/create`
+
+        console.log("🎨 Saving to:", endpoint)
+
+        const response = await fetch(endpoint, {
+          method: currentDesignId ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getAuthToken()}`,
+          },
+          body: JSON.stringify(designData),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.message || "Failed to save to server")
+        }
+
+        const savedDesign = await response.json()
+        console.log("🎨 Design saved successfully:", savedDesign)
+
+        // Update current design ID if this was a new design
+        if (!currentDesignId) {
+          setCurrentDesignId(savedDesign.id)
+        }
+
+        // Reload design history
+        await loadDesignHistory()
+
+        toast({
+          title: "Design Saved!",
+          description: `"${designName}" has been saved successfully.`,
+        })
+      } catch (apiError) {
+        console.error("🎨 API save failed, using local storage:", apiError)
+
+        // Fallback to local storage
+        const fallbackDesign: DesignData = {
+          id: currentDesignId || Date.now().toString(),
+          name: designName,
+          createdAt: currentDesignId
+              ? designHistory.find((d) => d.id === currentDesignId)?.createdAt || new Date().toISOString()
+              : new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          data: {
+            selectedTemplate,
+            logos: logosToSave,
+            canvasSize,
+            waxEffect,
+            templateColor,
+          },
+        }
+
+        const existingDesigns = JSON.parse(localStorage.getItem("mockup-designs") || "[]")
+        const updatedDesigns = [
+          fallbackDesign,
+          ...existingDesigns.filter((d: DesignData) => d.id !== fallbackDesign.id).slice(0, 9),
+        ]
+        localStorage.setItem("mockup-designs", JSON.stringify(updatedDesigns))
+        setDesignHistory(updatedDesigns)
+
+        if (!currentDesignId) {
+          setCurrentDesignId(fallbackDesign.id)
+        }
+
+        toast({
+          title: "Design Saved Locally!",
+          description: `"${designName}" has been saved to local storage.`,
+          variant: "default",
+        })
+      }
+
+      setCurrentDesignName(designName)
+      setShowSaveDialog(false)
+    } catch (error) {
+      console.error("🎨 Save failed:", error)
+      setSaveError("Failed to save design")
+      toast({
+        title: "Save Failed",
+        description: "There was an error saving your design.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const loadDesign = async (design: DesignData) => {
+    console.log("🎨 Loading design:", design)
+    setIsLoading(true)
+
+    try {
+      // Restore the design state
+      setSelectedTemplate(design.data.selectedTemplate)
+      setCanvasSize(design.data.canvasSize)
+      setWaxEffect(design.data.waxEffect)
+      setTemplateColor(design.data.templateColor)
+      setCurrentDesignName(design.name)
+      setCurrentDesignId(design.id)
+
+      // Restore logos with proper URL handling - only restore logos with valid URLs
+      const restoredLogos = (design.data.logos || [])
+          .filter((logo) => logo.url && !logo.url.startsWith("blob:")) // Only restore non-blob URLs
+          .map((logo) => ({
+            ...logo,
+            url: logo.originalUrl || logo.url, // Use original URL for AI-generated logos
+            file: null, // Files can't be restored
+          }))
+
+      console.log("🎨 Restored logos:", restoredLogos)
+      setLogos(restoredLogos)
+      setShowHistoryModal(false)
+      setShowWelcome(restoredLogos.length === 0)
+
+      toast({
+        title: "Design Loaded!",
+        description: `"${design.name}" has been loaded successfully.`,
+      })
+
+      if (restoredLogos.length < (design.data.logos?.length || 0)) {
+        toast({
+          title: "Some Images Skipped",
+          description: "Uploaded files couldn't be restored. Only AI-generated images were loaded.",
+          variant: "default",
+        })
+      }
+    } catch (error) {
+      console.error("🎨 Load failed:", error)
+      toast({
+        title: "Load Failed",
+        description: "There was an error loading the design.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const deleteDesign = async (designId: string) => {
+    if (!user) return
+
+    try {
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+      const response = await fetch(`${BACKEND_URL}/api/designs/delete?designId=${designId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${getAuthToken()}`,
+        },
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to delete from server")
+      }
+
+      // Reload design history
+      await loadDesignHistory()
+
+      toast({
+        title: "Design Deleted",
+        description: "The design has been removed from your history.",
+      })
+    } catch (error) {
+      console.error("🎨 Delete failed:", error)
+
+      // Fallback to local storage
+      const existingDesigns = JSON.parse(localStorage.getItem("mockup-designs") || "[]")
+      const updatedDesigns = existingDesigns.filter((d: DesignData) => d.id !== designId)
+      localStorage.setItem("mockup-designs", JSON.stringify(updatedDesigns))
+      setDesignHistory(updatedDesigns)
+
+      toast({
+        title: "Design Deleted Locally",
+        description: "The design has been removed from local storage.",
+      })
+    }
+  }
+
+  // Generate thumbnail for design preview
+  const generateDesignThumbnail = async (design: DesignData): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement("canvas")
+      const ctx = canvas.getContext("2d")
+
+      if (!ctx) {
+        resolve("/placeholder.svg?height=200&width=200")
+        return
+      }
+
+      // Set thumbnail size
+      canvas.width = 200
+      canvas.height = 200
+
+      // Draw white background
+      ctx.fillStyle = "white"
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Load and draw template
+      const templateImg = new window.Image()
+      templateImg.crossOrigin = "anonymous"
+      templateImg.onload = () => {
+        // Draw template
+        ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
+
+        // Draw logos
+        const visibleLogos = (design.data.logos || [])
+            .filter((logo) => logo.visible && logo.url && !logo.url.startsWith("blob:"))
+            .sort((a, b) => a.zIndex - b.zIndex)
+
+        if (visibleLogos.length === 0) {
+          resolve(canvas.toDataURL("image/jpeg", 0.8))
+          return
+        }
+
+        let loadedLogos = 0
+        const totalLogos = visibleLogos.length
+
+        visibleLogos.forEach((logo) => {
+          const logoImg = new window.Image()
+          logoImg.crossOrigin = "anonymous"
+          logoImg.onload = () => {
+            const x = (canvas.width * logo.position.x) / 100
+            const y = (canvas.height * logo.position.y) / 100
+            const size = (canvas.width * logo.size) / 100
+            const width = logo.maintainAspectRatio ? size : size
+            const height = logo.maintainAspectRatio ? size / logo.aspectRatio : size
+
+            ctx.save()
+            ctx.translate(x, y)
+            ctx.rotate((logo.rotation * Math.PI) / 180)
+            ctx.filter = getLogoFilterStyle(logo.filters)
+            ctx.drawImage(logoImg, -width / 2, -height / 2, width, height)
+            ctx.restore()
+
+            loadedLogos++
+            if (loadedLogos === totalLogos) {
+              resolve(canvas.toDataURL("image/jpeg", 0.8))
+            }
+          }
+          logoImg.onerror = () => {
+            loadedLogos++
+            if (loadedLogos === totalLogos) {
+              resolve(canvas.toDataURL("image/jpeg", 0.8))
+            }
+          }
+          logoImg.src = logo.url!
+        })
+      }
+      templateImg.onerror = () => {
+        resolve("/placeholder.svg?height=200&width=200")
+      }
+      templateImg.src = templateImages[design.data.selectedTemplate] || "/placeholder.svg"
+    })
+  }
+
+  const [designThumbnails, setDesignThumbnails] = useState<Record<string, string>>({})
+
+  const loadDesignHistory = async () => {
+    if (!user) {
+      setDesignHistory([])
+      return
+    }
+
+    try {
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+      const response = await fetch(`${BACKEND_URL}/api/designs/list`, {
+        headers: {
+          Authorization: `Bearer ${getAuthToken()}`,
+        },
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        console.log("🎨 API Response:", data) // Debug log
+
+        // Handle the nested response structure
+        let serverDesigns: DesignData[] = []
+        if (data.success && data.data && data.data.designs && Array.isArray(data.data.designs)) {
+          serverDesigns = data.data.designs
+          console.log("🎨 Extracted designs from nested structure:", serverDesigns)
+        } else if (Array.isArray(data)) {
+          serverDesigns = data
+          console.log("🎨 Using direct array response:", serverDesigns)
+        } else {
+          console.warn("🎨 Unexpected API response format:", data)
+          serverDesigns = []
+        }
+
+        setDesignHistory(serverDesigns)
+
+        // Generate thumbnails for designs
+        const thumbnails: Record<string, string> = {}
+        for (const design of serverDesigns) {
+          try {
+            const thumbnail = await generateDesignThumbnail(design)
+            thumbnails[design.id] = thumbnail
+          } catch (error) {
+            console.error("Failed to generate thumbnail for design:", design.id, error)
+            thumbnails[design.id] = "/placeholder.svg?height=200&width=200"
+          }
+        }
+        setDesignThumbnails(thumbnails)
+
+        // Sync with local storage
+        localStorage.setItem("mockup-designs", JSON.stringify(serverDesigns))
+        return
+      }
+
+      // Fallback to local storage
+      const savedDesigns = JSON.parse(localStorage.getItem("mockup-designs") || "[]")
+      const validDesigns = Array.isArray(savedDesigns) ? savedDesigns : []
+      setDesignHistory(validDesigns)
+
+      // Generate thumbnails for local designs
+      const thumbnails: Record<string, string> = {}
+      for (const design of validDesigns) {
+        try {
+          const thumbnail = await generateDesignThumbnail(design)
+          thumbnails[design.id] = thumbnail
+        } catch (error) {
+          console.error("Failed to generate thumbnail for design:", design.id, error)
+          thumbnails[design.id] = "/placeholder.svg?height=200&width=200"
+        }
+      }
+      setDesignThumbnails(thumbnails)
+    } catch (error) {
+      console.error("🎨 Load history failed:", error)
+      // Fallback to local storage
+      const savedDesigns = JSON.parse(localStorage.getItem("mockup-designs") || "[]")
+      const validDesigns = Array.isArray(savedDesigns) ? savedDesigns : []
+      setDesignHistory(validDesigns)
+
+      // Generate thumbnails for local designs
+      const thumbnails: Record<string, string> = {}
+      for (const design of validDesigns) {
+        try {
+          const thumbnail = await generateDesignThumbnail(design)
+          thumbnails[design.id] = thumbnail
+        } catch (error) {
+          console.error("Failed to generate thumbnail for design:", design.id, error)
+          thumbnails[design.id] = "/placeholder.svg?height=200&width=200"
+        }
+      }
+      setDesignThumbnails(thumbnails)
+    }
+  }
+
+  // Debug effect to log logos state changes
+  useEffect(() => {
+    console.log("🎨 Logos state changed:", {
+      count: logos.length,
+      logos: logos.map((logo, index) => ({
+        index,
+        id: logo.id,
+        hasFile: !!logo.file,
+        hasUrl: !!logo.url,
+        url: logo.url,
+        visible: logo.visible,
+      })),
+    })
+  }, [logos])
+
   return (
-    <div className="flex flex-col min-h-screen">
-      <header className="border-b p-4 bg-white">
-        <div className="container flex items-center justify-between mx-auto">
-          <div className="flex items-center gap-3">
-            <Link href="/">
-              <Button variant="outline" size="icon">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <Button variant="outline" size="icon" onClick={toggleLeftPanel}>
-              <PanelLeft className="h-4 w-4" />
-            </Button>
-            <div>
-              <h1 className="text-xl font-bold">Mockup Editor</h1>
-              <p className="text-sm text-gray-500">Create professional packaging mockups</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Dialog open={showResizeDialog} onOpenChange={setShowResizeDialog}>
-              <DialogTrigger asChild>
-                <Button variant="outline" className="gap-2">
-                  <Maximize2 className="h-4 w-4" /> Resize Canvas
+      <div className="flex flex-col min-h-screen">
+        <header className="border-b p-4 bg-white">
+          <div className="container flex items-center justify-between mx-auto">
+            <div className="flex items-center gap-3">
+              <Link href="/">
+                <Button variant="outline" size="icon">
+                  <ArrowLeft className="h-4 w-4" />
                 </Button>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>Resize Canvas</DialogTitle>
-                  <DialogDescription>
-                    Change the canvas size and choose how to handle existing elements.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Canvas Preset</Label>
-                    <Select value={selectedPreset} onValueChange={setSelectedPreset}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.entries(CANVAS_PRESETS).map(([key, preset]) => (
-                          <SelectItem key={key} value={key}>
-                            {preset.name} ({preset.width}x{preset.height})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {selectedPreset === "custom" && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label>Width (px)</Label>
-                        <Input
-                          type="number"
-                          value={customSize.width}
-                          onChange={(e) => setCustomSize((prev) => ({ ...prev, width: Number(e.target.value) }))}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Height (px)</Label>
-                        <Input
-                          type="number"
-                          value={customSize.height}
-                          onChange={(e) => setCustomSize((prev) => ({ ...prev, height: Number(e.target.value) }))}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex items-center space-x-2">
-                    <Switch id="scale-elements" checked={scaleElements} onCheckedChange={setScaleElements} />
-                    <Label htmlFor="scale-elements">Scale existing elements proportionally</Label>
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button onClick={resizeCanvas} className="flex-1">
-                      Apply Changes
-                    </Button>
-                    <Button variant="outline" onClick={() => setShowResizeDialog(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <Link href="/logo-designer">
-              <Button variant="outline" className="gap-2">
-                <Palette className="h-4 w-4" /> Logo Designer
+              </Link>
+              <Button variant="outline" size="icon" onClick={toggleLeftPanel}>
+                <PanelLeft className="h-4 w-4" />
               </Button>
-            </Link>
-            <Button onClick={handleDownload} className="gap-2" disabled={isDownloading || logos.length === 0}>
-              {isDownloading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
-                </>
-              ) : (
-                <>
-                  <Download className="h-4 w-4" /> Download
-                </>
-              )}
-            </Button>
-            <Button variant="outline" size="icon" onClick={toggleRightPanel}>
-              <PanelRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      <main className="flex-1 container py-6 mx-auto">
-        <div
-          className="grid gap-6"
-          style={{
-            gridTemplateColumns: `${showLeftPanel ? "320px" : "0px"} 1fr ${showRightPanel ? "320px" : "0px"}`,
-          }}
-        >
-          {/* Left Panel - Templates & AI */}
-          {showLeftPanel && (
-            <div className="space-y-6 transition-all duration-300">
-              {/* Template Selection */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Layers className="h-5 w-5" /> Templates
-                  </CardTitle>
-                  <CardDescription>Choose a template to start designing your mockup</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-2">
-                    {Object.entries(templateNames).map(([id, name]) => (
-                      <div
-                        key={id}
-                        className={`border rounded-lg p-2 cursor-pointer transition-all hover:border-primary ${selectedTemplate === id ? "border-primary bg-primary/5" : ""}`}
-                        onClick={() => setSelectedTemplate(id)}
-                      >
-                        <div className="relative w-full aspect-square mb-1">
-                          <Image
-                            src={templateImages[id] || "/placeholder.svg"}
-                            alt={name}
-                            fill
-                            className="object-contain p-1"
-                          />
-                        </div>
-                        <p className="text-xs text-center font-medium">{name}</p>
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Wax Effect */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Grid3X3 className="h-5 w-5" /> Wax Effect (Watermark)
-                  </CardTitle>
-                  <CardDescription>Add a subtle watermark pattern using your logo</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center space-x-2">
-                    <Switch
-                      id="wax-effect"
-                      checked={waxEffect.enabled}
-                      onCheckedChange={(enabled) => setWaxEffect((prev) => ({ ...prev, enabled }))}
-                    />
-                    <Label htmlFor="wax-effect">Enable Watermark Pattern</Label>
-                  </div>
-
-                  {waxEffect.enabled && (
-                    <>
-                      <div className="space-y-2">
-                        <Label>Opacity: {Math.round(waxEffect.opacity * 100)}%</Label>
-                        <Slider
-                          value={[waxEffect.opacity]}
-                          min={0.02}
-                          max={0.3}
-                          step={0.01}
-                          onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, opacity: value[0] }))}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Pattern Size: {waxEffect.size}px</Label>
-                        <Slider
-                          value={[waxEffect.size]}
-                          min={20}
-                          max={150}
-                          step={5}
-                          onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, size: value[0] }))}
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Rotation: {waxEffect.rotation}°</Label>
-                        <Slider
-                          value={[waxEffect.rotation]}
-                          min={0}
-                          max={360}
-                          step={15}
-                          onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, rotation: value[0] }))}
-                        />
-                      </div>
-
-                      <div className="text-xs text-gray-500 p-2 bg-blue-50 rounded">
-                        💡 <strong>Tip:</strong> Wax effect creates a subtle watermark pattern using your first logo.
-                        Perfect for branding and copyright protection!
-                      </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* AI Logo Generator */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Sparkles className="h-5 w-5" /> AI Logo Generator
-                  </CardTitle>
-                  <CardDescription>Generate logo ideas using AI</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="ai-prompt">Describe your logo</Label>
-                    <Textarea
-                      id="ai-prompt"
-                      placeholder="E.g., A minimalist coffee bean logo with blue and brown colors"
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={generateLogoWithAI}
-                    className="w-full gap-2"
-                    disabled={!aiPrompt.trim() || isGenerating}
-                  >
-                    <Sparkles className="h-4 w-4" />
-                    {isGenerating ? "Generating..." : "Generate Logo Ideas"}
+              <div>
+                <h1 className="text-xl font-bold">Mockup Editor</h1>
+                <p className="text-sm text-gray-500">Create professional packaging mockups</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Dialog open={showResizeDialog} onOpenChange={setShowResizeDialog}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Maximize2 className="h-4 w-4" /> Resize Canvas
                   </Button>
-
-                  <div className="text-xs text-gray-500">
-                    Example prompts:
-                    <ul className="mt-1 space-y-1">
-                      <li
-                        className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                        onClick={() => setAiPrompt("A modern tech company logo with gradient blue colors")}
-                      >
-                        • Modern tech company logo
-                      </li>
-                      <li
-                        className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                        onClick={() => setAiPrompt("A vintage bakery logo with wheat and rolling pin")}
-                      >
-                        • Vintage bakery logo
-                      </li>
-                      <li
-                        className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                        onClick={() => setAiPrompt("A fitness gym logo with a dumbbell silhouette")}
-                      >
-                        • Fitness gym logo
-                      </li>
-                    </ul>
-                  </div>
-
-                  {generatedLogos.length > 0 && (
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Resize Canvas</DialogTitle>
+                    <DialogDescription>
+                      Change the canvas size and choose how to handle existing elements.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4">
                     <div className="space-y-2">
-                      <Label>Generated Logos</Label>
-                      <div className="grid grid-cols-3 gap-2">
-                        {generatedLogos.map((url, index) => (
-                          <div
-                            key={index}
-                            className="border rounded-lg p-1 cursor-pointer hover:border-primary transition-all"
-                            onClick={() => addGeneratedLogo(url)}
-                          >
-                            <div className="relative w-full aspect-square">
-                              <Image
-                                src={url || "/placeholder.svg"}
-                                alt={`Generated logo ${index + 1}`}
-                                fill
-                                className="object-contain"
-                              />
-                            </div>
-                            <p className="text-xs text-center mt-1">Add</p>
-                          </div>
-                        ))}
-                      </div>
+                      <Label>Canvas Preset</Label>
+                      <Select value={selectedPreset} onValueChange={setSelectedPreset}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {Object.entries(CANVAS_PRESETS).map(([key, preset]) => (
+                              <SelectItem key={key} value={key}>
+                                {preset.name} ({preset.width}x{preset.height})
+                              </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
 
-          {/* Editor Preview */}
-          <div className="relative bg-gray-50 rounded-lg overflow-hidden">
-            {/* Canvas Controls */}
-            <div className="absolute top-4 left-4 z-20 flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowGrid(!showGrid)}
-                className={showGrid ? "bg-primary text-primary-foreground" : ""}
-              >
-                <Grid3X3 className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setSnapToGrid(!snapToGrid)}
-                className={snapToGrid ? "bg-primary text-primary-foreground" : ""}
-              >
-                Snap
-              </Button>
-            </div>
-
-            {/* Alignment Tools */}
-            {selectedLogos.length > 1 && (
-              <div className="absolute top-4 right-4 z-20 flex gap-1 bg-white rounded-lg p-1 shadow-lg">
-                <Button variant="ghost" size="sm" onClick={() => alignElements("left")}>
-                  <AlignLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("center")}>
-                  <AlignCenter className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("right")}>
-                  <AlignRight className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("top")}>
-                  <AlignJustify className="h-4 w-4 rotate-90" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("middle")}>
-                  <AlignJustify className="h-4 w-4 rotate-90" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("bottom")}>
-                  <AlignJustify className="h-4 w-4 rotate-90" />
-                </Button>
-                <Separator orientation="vertical" className="h-6" />
-                <Button variant="ghost" size="sm" onClick={() => alignElements("distribute-h")}>
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => alignElements("distribute-v")}>
-                  <MoreHorizontal className="h-4 w-4 rotate-90" />
-                </Button>
-              </div>
-            )}
-
-            <div
-              ref={containerRef}
-              className="relative w-full aspect-square bg-white rounded-lg shadow-sm overflow-hidden"
-              onMouseMove={handleDragMove}
-              onTouchMove={handleDragMove}
-              onClick={handleCanvasClick}
-              style={{
-                backgroundImage: showGrid
-                  ? "linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)"
-                  : "none",
-                backgroundSize: showGrid ? "5% 5%" : "auto",
-              }}
-            >
-              <Image
-                src={templateImages[selectedTemplate] || "/placeholder.svg"}
-                alt={templateNames[selectedTemplate] || "Template"}
-                fill
-                className="object-contain"
-              />
-
-              {/* Wax Effect Overlay - Replace existing implementation */}
-              {waxEffect.enabled && logos.length > 0 && logos[0].url && (
-                <div
-                  className="absolute inset-0 pointer-events-none z-0"
-                  style={{
-                    opacity: waxEffect.opacity,
-                    backgroundImage: `url(${logos[0].url})`,
-                    backgroundSize: `${waxEffect.size}px ${waxEffect.size}px`,
-                    backgroundRepeat: "repeat",
-                    backgroundPosition: "center",
-                    transform: `rotate(${waxEffect.rotation}deg)`,
-                    transformOrigin: "center",
-                    filter: "grayscale(100%) brightness(1.5)",
-                    mixBlendMode: "multiply",
-                  }}
-                />
-              )}
-
-              {logos
-                .filter((logo) => logo.visible)
-                .sort((a, b) => a.zIndex - b.zIndex)
-                .map((logo, index) => {
-                  const originalIndex = logos.findIndex((l) => l.id === logo.id)
-                  return (
-                    logo.url && (
-                      <div
-                        key={logo.id}
-                        className={`absolute cursor-move logo-image transition-all ${
-                          selectedLogoIndex === originalIndex
-                            ? "ring-2 ring-primary ring-offset-2 z-10"
-                            : selectedLogos.includes(originalIndex)
-                              ? "ring-2 ring-blue-400 ring-offset-2 z-10"
-                              : "z-5"
-                        } ${logo.locked ? "cursor-not-allowed" : ""}`}
-                        style={{
-                          left: `${logo.position.x}%`,
-                          top: `${logo.position.y}%`,
-                          transform: `translate(-50%, -50%) rotate(${logo.rotation}deg)`,
-                          width: `${logo.size}%`,
-                          height: logo.maintainAspectRatio ? `${logo.size / logo.aspectRatio}%` : `${logo.size}%`,
-                          touchAction: "none",
-                          zIndex: logo.zIndex,
-                          opacity: logo.locked ? 0.7 : 1,
-                        }}
-                        onMouseDown={(e) => handleDragStart(e, originalIndex)}
-                        onTouchStart={(e) => handleDragStart(e, originalIndex)}
-                      >
-                        <Image
-                          src={logo.url || "/placeholder.svg"}
-                          alt={`Logo ${originalIndex + 1}`}
-                          fill
-                          className="object-contain"
-                          style={{
-                            pointerEvents: "none",
-                            filter: getLogoFilterStyle(logo.filters),
-                          }}
-                        />
-
-                        {/* Resize Handles */}
-                        {renderResizeHandles(logo, originalIndex)}
-
-                        {/* Lock indicator */}
-                        {logo.locked && (
-                          <div className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl">
-                            <Lock className="h-3 w-3" />
-                          </div>
-                        )}
-                      </div>
-                    )
-                  )
-                })}
-
-              {/* Welcome Message */}
-              {showWelcome && logos.length === 0 && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Card className="max-w-md mx-4">
-                    <CardContent className="p-6 text-center">
-                      <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                      <h3 className="text-lg font-semibold mb-2">Upload Your Logo</h3>
-                      <p className="text-gray-600 mb-4">Get started by uploading your logo or generating one with AI</p>
-                      <div className="flex flex-col gap-2">
-                        <input
-                          type="file"
-                          id="welcome-upload"
-                          accept="image/*"
-                          onChange={handleImageUpload}
-                          className="hidden"
-                        />
-                        <label htmlFor="welcome-upload">
-                          <Button className="w-full gap-2" asChild>
-                            <span>
-                              <Upload className="h-4 w-4" /> Upload Logo
-                            </span>
-                          </Button>
-                        </label>
-                        <Link href="/logo-designer">
-                          <Button variant="outline" className="w-full gap-2">
-                            <Palette className="h-4 w-4" /> Design Logo
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
-
-            {/* Help Text */}
-            {logos.length > 0 && (
-              <div className="absolute bottom-4 left-4 right-4">
-                <div className="bg-white/90 backdrop-blur-sm rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2">
-                  <HelpCircle className="h-4 w-4" />
-                  <span>
-                    Drag to move • Drag corners to resize • Ctrl+Click for multi-select • Right-click for options
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right Panel - Editor Controls */}
-          {showRightPanel && (
-            <div className="space-y-6 transition-all duration-300">
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="grid grid-cols-4 w-full">
-                  <TabsTrigger value="logo">Logos</TabsTrigger>
-                  <TabsTrigger value="layers">Layers</TabsTrigger>
-                  <TabsTrigger value="colors">Colors</TabsTrigger>
-                  <TabsTrigger value="export">Export</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="logo" className="space-y-6 pt-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <ImageIcon className="h-5 w-5" /> Manage Logos
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex flex-wrap gap-2">
-                        {logos.map((logo, index) => (
-                          <div
-                            key={logo.id}
-                            className={`border rounded-lg p-1 cursor-pointer transition-all ${
-                              selectedLogoIndex === index
-                                ? "border-primary bg-primary/5"
-                                : selectedLogos.includes(index)
-                                  ? "border-blue-400 bg-blue-50"
-                                  : "hover:border-gray-300"
-                            } ${!logo.visible ? "opacity-50" : ""}`}
-                            onClick={() => setSelectedLogoIndex(index)}
-                          >
-                            <div className="relative w-12 h-12">
-                              {logo.url && (
-                                <Image
-                                  src={logo.url || "/placeholder.svg"}
-                                  alt={`Logo ${index + 1}`}
-                                  fill
-                                  className="object-contain"
-                                  style={{ filter: getLogoFilterStyle(logo.filters) }}
-                                />
-                              )}
-                              {logo.locked && <Lock className="absolute top-0 right-0 h-3 w-3 text-red-500" />}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="flex flex-col gap-2">
-                        <input
-                          type="file"
-                          id="logo-upload-side"
-                          accept="image/*"
-                          onChange={handleImageUpload}
-                          className="hidden"
-                        />
-                        <label htmlFor="logo-upload-side">
-                          <Button variant="outline" className="w-full gap-2" asChild>
-                            <span>
-                              <Upload className="h-4 w-4" /> Upload New Logo
-                            </span>
-                          </Button>
-                        </label>
-
-                        {selectedLogo && (
-                          <>
-                            <Button variant="outline" onClick={resetLogo} className="gap-2">
-                              <RotateCcw className="h-4 w-4" /> Reset Position
-                            </Button>
-                            <Button
-                              variant="outline"
-                              onClick={removeLogo}
-                              className="gap-2 text-destructive hover:text-destructive"
-                            >
-                              <Trash2 className="h-4 w-4" /> Remove Logo
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  {selectedLogo && (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle>Logo Settings</CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
-                          {selectedLogo.url && (
-                            <Image
-                              src={selectedLogo.url || "/placeholder.svg"}
-                              alt="Selected logo"
-                              fill
-                              className="object-contain"
-                              style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
-                            />
-                          )}
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm">Size</span>
-                            <div className="flex items-center gap-2">
-                              <ZoomIn className="h-4 w-4 text-gray-500" />
-                              <span className="text-sm">{selectedLogo.size}%</span>
-                            </div>
-                          </div>
-                          <Slider
-                            value={[selectedLogo.size]}
-                            min={5}
-                            max={100}
-                            step={1}
-                            onValueChange={(value) => updateLogoSize(value[0])}
-                          />
-                        </div>
-
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm">Rotation</span>
-                            <span className="text-sm">{selectedLogo.rotation}°</span>
-                          </div>
-                          <Slider
-                            value={[selectedLogo.rotation]}
-                            min={0}
-                            max={360}
-                            step={1}
-                            onValueChange={(value) => updateLogoRotation(value[0])}
-                          />
-                        </div>
-
-                        <div className="flex items-center space-x-2">
-                          <Switch
-                            id="maintain-aspect"
-                            checked={selectedLogo.maintainAspectRatio}
-                            onCheckedChange={toggleMaintainAspectRatio}
-                          />
-                          <Label htmlFor="maintain-aspect">Maintain aspect ratio</Label>
-                        </div>
-
-                        <div className="flex items-center gap-2 text-sm text-gray-600">
-                          <Move className="h-4 w-4" />
-                          <span>Drag logo on canvas to position</span>
-                        </div>
-
+                    {selectedPreset === "custom" && (
                         <div className="grid grid-cols-2 gap-2">
                           <div className="space-y-1">
-                            <Label htmlFor="position-x">X Position</Label>
+                            <Label>Width (px)</Label>
                             <Input
-                              id="position-x"
-                              type="number"
-                              value={Math.round(selectedLogo.position.x)}
-                              onChange={(e) => updateLogoPosition(Number(e.target.value), selectedLogo.position.y)}
-                              min={0}
-                              max={100}
+                                type="number"
+                                value={customSize.width}
+                                onChange={(e) => setCustomSize((prev) => ({ ...prev, width: Number(e.target.value) }))}
                             />
                           </div>
                           <div className="space-y-1">
-                            <Label htmlFor="position-y">Y Position</Label>
+                            <Label>Height (px)</Label>
                             <Input
-                              id="position-y"
-                              type="number"
-                              value={Math.round(selectedLogo.position.y)}
-                              onChange={(e) => updateLogoPosition(selectedLogo.position.x, Number(e.target.value))}
-                              min={0}
-                              max={100}
+                                type="number"
+                                value={customSize.height}
+                                onChange={(e) => setCustomSize((prev) => ({ ...prev, height: Number(e.target.value) }))}
                             />
                           </div>
                         </div>
-                      </CardContent>
-                    </Card>
-                  )}
-                </TabsContent>
+                    )}
 
-                <TabsContent value="layers" className="space-y-6 pt-4">
+                    <div className="flex items-center space-x-2">
+                      <Switch id="scale-elements" checked={scaleElements} onCheckedChange={setScaleElements} />
+                      <Label htmlFor="scale-elements">Scale existing elements proportionally</Label>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button onClick={resizeCanvas} className="flex-1">
+                        Apply Changes
+                      </Button>
+                      <Button variant="outline" onClick={() => setShowResizeDialog(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Link href="/logo-designer">
+                <Button variant="outline" className="gap-2">
+                  <Palette className="h-4 w-4" /> Logo Designer
+                </Button>
+              </Link>
+              <Button onClick={handleDownload} className="gap-2" disabled={isDownloading || logos.length === 0}>
+                {isDownloading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
+                    </>
+                ) : (
+                    <>
+                      <Download className="h-4 w-4" /> Download
+                    </>
+                )}
+              </Button>
+              <Button variant="outline" size="icon" onClick={toggleRightPanel}>
+                <PanelRight className="h-4 w-4" />
+              </Button>
+              <Button variant="outline" className="gap-2" onClick={() => setShowHistoryModal(true)} disabled={isLoading}>
+                {isLoading ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Loading...
+                    </>
+                ) : (
+                    <>
+                      <Clock className="h-4 w-4" /> Recent
+                    </>
+                )}
+              </Button>
+              <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => setShowSaveDialog(true)}
+                  disabled={logos.length === 0 || isSaving || !user}
+              >
+                {isSaving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" /> Saving...
+                    </>
+                ) : (
+                    <>
+                      <Save className="h-4 w-4" /> Save
+                    </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 container py-6 mx-auto">
+          <div
+              className="grid gap-6"
+              style={{
+                gridTemplateColumns: `${showLeftPanel ? "320px" : "0px"} 1fr ${showRightPanel ? "320px" : "0px"}`,
+              }}
+          >
+            {/* Left Panel - Templates & AI */}
+            {showLeftPanel && (
+                <div className="space-y-6 transition-all duration-300">
+                  {/* Template Selection */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Layers className="h-5 w-5" /> Layer Management
+                        <Layers className="h-5 w-5" /> Templates
                       </CardTitle>
-                      <CardDescription>Manage the stacking order and properties of your elements</CardDescription>
+                      <CardDescription>Choose a template to start designing your mockup</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-2">
-                      {logos
-                        .map((logo, index) => ({ logo, index }))
-                        .sort((a, b) => b.logo.zIndex - a.logo.zIndex)
-                        .map(({ logo, index }) => (
-                          <div
-                            key={logo.id}
-                            className={`flex items-center gap-2 p-2 border rounded-lg ${
-                              selectedLogoIndex === index ? "border-primary bg-primary/5" : ""
-                            }`}
-                            onClick={() => setSelectedLogoIndex(index)}
-                          >
-                            <div className="relative w-8 h-8 flex-shrink-0">
-                              {logo.url && (
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 gap-2">
+                        {Object.entries(templateNames).map(([id, name]) => (
+                            <div
+                                key={id}
+                                className={`border rounded-lg p-2 cursor-pointer transition-all hover:border-primary ${selectedTemplate === id ? "border-primary bg-primary/5" : ""}`}
+                                onClick={() => setSelectedTemplate(id)}
+                            >
+                              <div className="relative w-full aspect-square mb-1">
                                 <Image
-                                  src={logo.url || "/placeholder.svg"}
-                                  alt={`Layer ${index + 1}`}
-                                  fill
-                                  className="object-contain rounded"
+                                    src={templateImages[id] || "/placeholder.svg"}
+                                    alt={name}
+                                    fill
+                                    className="object-contain p-1"
                                 />
-                              )}
+                              </div>
+                              <p className="text-xs text-center font-medium">{name}</p>
                             </div>
-
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">Logo {index + 1}</p>
-                              <p className="text-xs text-gray-500">Z-Index: {logo.zIndex}</p>
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  toggleLayerVisibility(index)
-                                }}
-                              >
-                                {logo.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                              </Button>
-
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  toggleLayerLock(index)
-                                }}
-                              >
-                                {logo.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                              </Button>
-
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button variant="ghost" size="sm">
-                                    <MoreHorizontal className="h-4 w-4" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                  <DropdownMenuItem onClick={() => moveLayerUp(index)}>
-                                    <ChevronUp className="h-4 w-4 mr-2" />
-                                    Bring Forward
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => moveLayerDown(index)}>
-                                    <ChevronDown className="h-4 w-4 mr-2" />
-                                    Send Backward
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => bringToFront(index)}>
-                                    Bring to Front
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => sendToBack(index)}>Send to Back</DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </div>
-                          </div>
                         ))}
+                      </div>
+                    </CardContent>
+                  </Card>
 
-                      {logos.length === 0 && (
-                        <div className="text-center py-8 text-gray-500">
-                          <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                          <p>No layers yet. Add some logos to get started!</p>
-                        </div>
+                  {/* Wax Effect */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Grid3X3 className="h-5 w-5" /> Wax Effect (Watermark)
+                      </CardTitle>
+                      <CardDescription>Add a subtle watermark pattern using your logo</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                            id="wax-effect"
+                            checked={waxEffect.enabled}
+                            onCheckedChange={(enabled) => setWaxEffect((prev) => ({ ...prev, enabled }))}
+                        />
+                        <Label htmlFor="wax-effect">Enable Watermark Pattern</Label>
+                      </div>
+
+                      {waxEffect.enabled && (
+                          <>
+                            <div className="space-y-2">
+                              <Label>Opacity: {Math.round(waxEffect.opacity * 100)}%</Label>
+                              <Slider
+                                  value={[waxEffect.opacity]}
+                                  min={0.02}
+                                  max={0.3}
+                                  step={0.01}
+                                  onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, opacity: value[0] }))}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Pattern Size: {waxEffect.size}px</Label>
+                              <Slider
+                                  value={[waxEffect.size]}
+                                  min={20}
+                                  max={150}
+                                  step={5}
+                                  onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, size: value[0] }))}
+                              />
+                            </div>
+
+                            <div className="space-y-2">
+                              <Label>Rotation: {waxEffect.rotation}°</Label>
+                              <Slider
+                                  value={[waxEffect.rotation]}
+                                  min={0}
+                                  max={360}
+                                  step={15}
+                                  onValueChange={(value) => setWaxEffect((prev) => ({ ...prev, rotation: value[0] }))}
+                              />
+                            </div>
+
+                            <div className="text-xs text-gray-500 p-2 bg-blue-50 rounded">
+                              💡 <strong>Tip:</strong> Wax effect creates a subtle watermark pattern using your first logo.
+                              Perfect for branding and copyright protection!
+                            </div>
+                          </>
                       )}
                     </CardContent>
                   </Card>
-                </TabsContent>
 
-                <TabsContent value="colors" className="space-y-6 pt-4">
-                  {selectedLogo ? (
-                    <Card>
-                      <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                          <Palette className="h-5 w-5" /> Logo Color Adjustments
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent className="space-y-4">
-                        <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
-                          {selectedLogo.url && (
-                            <Image
-                              src={selectedLogo.url || "/placeholder.svg"}
-                              alt="Selected logo"
-                              fill
-                              className="object-contain"
-                              style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
-                            />
-                          )}
-                        </div>
-
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm flex items-center gap-1">
-                                <SunMedium className="h-4 w-4" /> Brightness
-                              </span>
-                              <span className="text-sm">{selectedLogo.filters.brightness}%</span>
-                            </div>
-                            <Slider
-                              value={[selectedLogo.filters.brightness]}
-                              min={0}
-                              max={200}
-                              step={1}
-                              onValueChange={(value) => updateLogoFilter("brightness", value[0])}
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm flex items-center gap-1">
-                                <Contrast className="h-4 w-4" /> Contrast
-                              </span>
-                              <span className="text-sm">{selectedLogo.filters.contrast}%</span>
-                            </div>
-                            <Slider
-                              value={[selectedLogo.filters.contrast]}
-                              min={0}
-                              max={200}
-                              step={1}
-                              onValueChange={(value) => updateLogoFilter("contrast", value[0])}
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm">Hue Rotation</span>
-                              <span className="text-sm">{selectedLogo.filters.hue}°</span>
-                            </div>
-                            <Slider
-                              value={[selectedLogo.filters.hue]}
-                              min={0}
-                              max={360}
-                              step={1}
-                              onValueChange={(value) => updateLogoFilter("hue", value[0])}
-                            />
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm">Saturation</span>
-                              <span className="text-sm">{selectedLogo.filters.saturation}%</span>
-                            </div>
-                            <Slider
-                              value={[selectedLogo.filters.saturation]}
-                              min={0}
-                              max={200}
-                              step={1}
-                              onValueChange={(value) => updateLogoFilter("saturation", value[0])}
-                            />
-                          </div>
-
-                          <Button
-                            variant="outline"
-                            onClick={() => {
-                              if (selectedLogoIndex === null) return
-                              const newLogos = [...logos]
-                              newLogos[selectedLogoIndex] = {
-                                ...newLogos[selectedLogoIndex],
-                                filters: {
-                                  brightness: 100,
-                                  contrast: 100,
-                                  hue: 0,
-                                  saturation: 100,
-                                },
-                              }
-                              setLogos(newLogos)
-                            }}
-                            className="w-full"
-                          >
-                            Reset Color Adjustments
-                          </Button>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    <Card>
-                      <CardContent className="p-6 text-center">
-                        <Palette className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                        <p className="text-gray-500">Select a logo to adjust its colors</p>
-                      </CardContent>
-                    </Card>
-                  )}
-
+                  {/* AI Logo Generator */}
                   <Card>
                     <CardHeader>
-                      <CardTitle>Color Presets</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid grid-cols-2 gap-2">
-                        <Button
-                          variant="outline"
-                          className="h-auto py-3"
-                          onClick={() => {
-                            if (selectedLogoIndex === null) return
-                            const newLogos = [...logos]
-                            newLogos[selectedLogoIndex] = {
-                              ...newLogos[selectedLogoIndex],
-                              filters: {
-                                brightness: 100,
-                                contrast: 120,
-                                hue: 0,
-                                saturation: 110,
-                              },
-                            }
-                            setLogos(newLogos)
-                          }}
-                          disabled={!selectedLogo}
-                        >
-                          <div className="flex flex-col items-center">
-                            <span className="font-medium">Vibrant</span>
-                            <span className="text-xs text-gray-500">High contrast</span>
-                          </div>
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          className="h-auto py-3"
-                          onClick={() => {
-                            if (selectedLogoIndex === null) return
-                            const newLogos = [...logos]
-                            newLogos[selectedLogoIndex] = {
-                              ...newLogos[selectedLogoIndex],
-                              filters: {
-                                brightness: 110,
-                                contrast: 90,
-                                hue: 0,
-                                saturation: 80,
-                              },
-                            }
-                            setLogos(newLogos)
-                          }}
-                          disabled={!selectedLogo}
-                        >
-                          <div className="flex flex-col items-center">
-                            <span className="font-medium">Soft</span>
-                            <span className="text-xs text-gray-500">Muted colors</span>
-                          </div>
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          className="h-auto py-3"
-                          onClick={() => {
-                            if (selectedLogoIndex === null) return
-                            const newLogos = [...logos]
-                            newLogos[selectedLogoIndex] = {
-                              ...newLogos[selectedLogoIndex],
-                              filters: {
-                                brightness: 100,
-                                contrast: 100,
-                                hue: 180,
-                                saturation: 100,
-                              },
-                            }
-                            setLogos(newLogos)
-                          }}
-                          disabled={!selectedLogo}
-                        >
-                          <div className="flex flex-col items-center">
-                            <span className="font-medium">Invert Hue</span>
-                            <span className="text-xs text-gray-500">Opposite colors</span>
-                          </div>
-                        </Button>
-
-                        <Button
-                          variant="outline"
-                          className="h-auto py-3"
-                          onClick={() => {
-                            if (selectedLogoIndex === null) return
-                            const newLogos = [...logos]
-                            newLogos[selectedLogoIndex] = {
-                              ...newLogos[selectedLogoIndex],
-                              filters: {
-                                brightness: 120,
-                                contrast: 110,
-                                hue: 0,
-                                saturation: 0,
-                              },
-                            }
-                            setLogos(newLogos)
-                          }}
-                          disabled={!selectedLogo}
-                        >
-                          <div className="flex flex-col items-center">
-                            <span className="font-medium">Grayscale</span>
-                            <span className="text-xs text-gray-500">Black & white</span>
-                          </div>
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </TabsContent>
-
-                <TabsContent value="export" className="space-y-6 pt-4">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Canvas Information</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Canvas Size:</span>
-                        <span className="text-sm font-medium">
-                          {canvasSize.width} × {canvasSize.height}px
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Elements:</span>
-                        <span className="text-sm font-medium">{logos.length} logos</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-sm text-gray-600">Visible Elements:</span>
-                        <span className="text-sm font-medium">{logos.filter((l) => l.visible).length}</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Export Settings</CardTitle>
-                      <CardDescription>Download your mockup in high quality</CardDescription>
+                      <CardTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5" /> AI Logo Generator
+                      </CardTitle>
+                      <CardDescription>Generate logo ideas using AI</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="space-y-2">
-                        <Label htmlFor="export-format">Export Format</Label>
-                        <Select defaultValue="png">
-                          <SelectTrigger id="export-format">
-                            <SelectValue placeholder="Select format" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="png">PNG Image</SelectItem>
-                            <SelectItem value="jpg">JPG Image</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Label htmlFor="ai-prompt">Describe your logo</Label>
+                        <Textarea
+                            id="ai-prompt"
+                            placeholder="E.g., A minimalist coffee bean logo with blue and brown colors"
+                            value={aiPrompt}
+                            onChange={(e) => setAiPrompt(e.target.value)}
+                        />
                       </div>
 
-                      <div className="space-y-2">
-                        <Label htmlFor="export-quality">Image Quality</Label>
-                        <Select defaultValue="high">
-                          <SelectTrigger id="export-quality">
-                            <SelectValue placeholder="Select quality" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="low">Low (72 DPI)</SelectItem>
-                            <SelectItem value="medium">Medium (150 DPI)</SelectItem>
-                            <SelectItem value="high">High (300 DPI)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <Button onClick={handleDownload} className="w-full gap-2" disabled={isDownloading}>
-                        {isDownloading ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
-                          </>
-                        ) : (
-                          <>
-                            <Download className="h-4 w-4" /> Download Mockup
-                          </>
-                        )}
+                      <Button
+                          onClick={generateLogoWithAI}
+                          className="w-full gap-2"
+                          disabled={!aiPrompt.trim() || isGenerating}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        {isGenerating ? "Generating..." : "Generate Logo Ideas"}
                       </Button>
+
+                      <div className="text-xs text-gray-500">
+                        Example prompts:
+                        <ul className="mt-1 space-y-1">
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setAiPrompt("A modern tech company logo with gradient blue colors")}
+                          >
+                            • Modern tech company logo
+                          </li>
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setAiPrompt("A vintage bakery logo with wheat and rolling pin")}
+                          >
+                            • Vintage bakery logo
+                          </li>
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setAiPrompt("A fitness gym logo with a dumbbell silhouette")}
+                          >
+                            • Fitness gym logo
+                          </li>
+                        </ul>
+                      </div>
+
+                      {generatedLogos.length > 0 && (
+                          <div className="space-y-2">
+                            <Label>Generated Logos</Label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {generatedLogos.map((url, index) => (
+                                  <div
+                                      key={index}
+                                      className="border rounded-lg p-1 cursor-pointer hover:border-primary transition-all"
+                                      onClick={() => addGeneratedLogo(url)}
+                                  >
+                                    <div className="relative w-full aspect-square">
+                                      <Image
+                                          src={url || "/placeholder.svg"}
+                                          alt={`Generated logo ${index + 1}`}
+                                          fill
+                                          className="object-contain"
+                                      />
+                                    </div>
+                                    <p className="text-xs text-center mt-1">Add</p>
+                                  </div>
+                              ))}
+                            </div>
+                          </div>
+                      )}
                     </CardContent>
                   </Card>
-                </TabsContent>
-              </Tabs>
-            </div>
-          )}
-        </div>
-      </main>
-      <LoginModal open={showAuthModal} onOpenChange={handleAuthModalClose} onSuccess={handleAuthSuccess} />
-    </div>
+                </div>
+            )}
 
+            {/* Editor Preview */}
+            <div className="relative bg-gray-50 rounded-lg overflow-hidden">
+              {/* Canvas Controls */}
+              <div className="absolute top-4 left-4 z-20 flex gap-2">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowGrid(!showGrid)}
+                    className={showGrid ? "bg-primary text-primary-foreground" : ""}
+                >
+                  <Grid3X3 className="h-4 w-4" />
+                </Button>
+                <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSnapToGrid(!snapToGrid)}
+                    className={snapToGrid ? "bg-primary text-primary-foreground" : ""}
+                >
+                  Snap
+                </Button>
+              </div>
+
+              {/* Alignment Tools */}
+              {selectedLogos.length > 1 && (
+                  <div className="absolute top-4 right-4 z-20 flex gap-1 bg-white rounded-lg p-1 shadow-lg">
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("left")}>
+                      <AlignLeft className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("center")}>
+                      <AlignCenter className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("right")}>
+                      <AlignRight className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("top")}>
+                      <AlignJustify className="h-4 w-4 rotate-90" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("middle")}>
+                      <AlignJustify className="h-4 w-4 rotate-90" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("bottom")}>
+                      <AlignJustify className="h-4 w-4 rotate-90" />
+                    </Button>
+                    <Separator orientation="vertical" className="h-6" />
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("distribute-h")}>
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => alignElements("distribute-v")}>
+                      <MoreHorizontal className="h-4 w-4 rotate-90" />
+                    </Button>
+                  </div>
+              )}
+
+              <div
+                  ref={containerRef}
+                  className="relative w-full aspect-square bg-gray-50 rounded-lg shadow-sm overflow-hidden"
+                  onMouseMove={handleDragMove}
+                  onTouchMove={handleDragMove}
+                  onClick={handleCanvasClick}
+                  style={{
+                    backgroundImage: showGrid
+                        ? "linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px)"
+                        : "none",
+                    backgroundSize: showGrid ? "5% 5%" : "auto",
+                  }}
+              >
+                <Image
+                    src={templateImages[selectedTemplate] || "/placeholder.svg"}
+                    alt={templateNames[selectedTemplate] || "Template"}
+                    fill
+                    className="object-contain"
+                />
+
+                {/* Wax Effect Overlay */}
+                {waxEffect.enabled && logos.length > 0 && logos[0].url && (
+                    <div
+                        className="absolute inset-0 pointer-events-none z-0"
+                        style={{
+                          opacity: waxEffect.opacity,
+                          backgroundImage: `url(${logos[0].url})`,
+                          backgroundSize: `${waxEffect.size}px ${waxEffect.size}px`,
+                          backgroundRepeat: "repeat",
+                          backgroundPosition: "center",
+                          transform: `rotate(${waxEffect.rotation}deg)`,
+                          transformOrigin: "center",
+                          filter: "grayscale(100%) brightness(1.5)",
+                          mixBlendMode: "multiply",
+                        }}
+                    />
+                )}
+
+                {logos
+                    .filter((logo) => logo.visible)
+                    .sort((a, b) => a.zIndex - b.zIndex)
+                    .map((logo, index) => {
+                      const originalIndex = logos.findIndex((l) => l.id === logo.id)
+                      return (
+                          logo.url && (
+                              <div
+                                  key={logo.id}
+                                  className={`absolute cursor-move logo-image transition-all ${
+                                      selectedLogoIndex === originalIndex
+                                          ? "ring-2 ring-primary ring-offset-2 z-10"
+                                          : selectedLogos.includes(originalIndex)
+                                              ? "ring-2 ring-blue-400 ring-offset-2 z-10"
+                                              : "z-5"
+                                  } ${logo.locked ? "cursor-not-allowed" : ""}`}
+                                  style={{
+                                    left: `${logo.position.x}%`,
+                                    top: `${logo.position.y}%`,
+                                    transform: `translate(-50%, -50%) rotate(${logo.rotation}deg)`,
+                                    width: `${logo.size}%`,
+                                    height: logo.maintainAspectRatio ? `${logo.size / logo.aspectRatio}%` : `${logo.size}%`,
+                                    touchAction: "none",
+                                    zIndex: logo.zIndex,
+                                    opacity: logo.locked ? 0.7 : 1,
+                                  }}
+                                  onMouseDown={(e) => handleDragStart(e, originalIndex)}
+                                  onTouchStart={(e) => handleDragStart(e, originalIndex)}
+                              >
+                                <Image
+                                    src={logo.url || "/placeholder.svg"}
+                                    alt={`Logo ${originalIndex + 1}`}
+                                    fill
+                                    className="object-contain"
+                                    style={{
+                                      pointerEvents: "none",
+                                      filter: getLogoFilterStyle(logo.filters),
+                                    }}
+                                />
+
+                                {/* Resize Handles */}
+                                {renderResizeHandles(logo, originalIndex)}
+
+                                {/* Lock indicator */}
+                                {logo.locked && (
+                                    <div className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl">
+                                      <Lock className="h-3 w-3" />
+                                    </div>
+                                )}
+                              </div>
+                          )
+                      )
+                    })}
+
+                {/* Welcome Message */}
+                {showWelcome && logos.length === 0 && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <Card className="max-w-md mx-4">
+                        <CardContent className="p-6 text-center">
+                          <Upload className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                          <h3 className="text-lg font-semibold mb-2">Upload Your Logo</h3>
+                          <p className="text-gray-600 mb-4">Get started by uploading your logo or generating one with AI</p>
+                          <div className="flex flex-col gap-2">
+                            <input
+                                type="file"
+                                id="welcome-upload"
+                                accept="image/*"
+                                onChange={handleImageUpload}
+                                className="hidden"
+                                disabled={isUploading}
+                            />
+                            <label htmlFor="welcome-upload">
+                              <Button className="w-full gap-2" asChild disabled={isUploading}>
+                            <span>
+                              {isUploading ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                                  </>
+                              ) : (
+                                  <>
+                                    <Upload className="h-4 w-4" /> Upload Logo
+                                  </>
+                              )}
+                            </span>
+                              </Button>
+                            </label>
+                            <Link href="/logo-designer">
+                              <Button variant="outline" className="w-full gap-2">
+                                <Palette className="h-4 w-4" /> Design Logo
+                              </Button>
+                            </Link>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                )}
+              </div>
+
+              {/* Help Text */}
+              {logos.length > 0 && (
+                  <div className="absolute bottom-4 left-4 right-4">
+                    <div className="bg-white/90 backdrop-blur-sm rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2">
+                      <HelpCircle className="h-4 w-4" />
+                      <span>
+                    Drag to move • Drag corners to resize • Ctrl+Click for multi-select • Right-click for options
+                  </span>
+                    </div>
+                  </div>
+              )}
+            </div>
+
+            {/* Right Panel - Editor Controls */}
+            {showRightPanel && (
+                <div className="space-y-6 transition-all duration-300">
+                  <Tabs value={activeTab} onValueChange={setActiveTab}>
+                    <TabsList className="grid grid-cols-4 w-full">
+                      <TabsTrigger value="logo">Logos</TabsTrigger>
+                      <TabsTrigger value="layers">Layers</TabsTrigger>
+                      <TabsTrigger value="colors">Colors</TabsTrigger>
+                      <TabsTrigger value="export">Export</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="logo" className="space-y-6 pt-4">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <ImageIcon className="h-5 w-5" /> Manage Logos
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="flex flex-wrap gap-2">
+                            {logos.map((logo, index) => (
+                                <div
+                                    key={logo.id}
+                                    className={`border rounded-lg p-1 cursor-pointer transition-all ${
+                                        selectedLogoIndex === index
+                                            ? "border-primary bg-primary/5"
+                                            : selectedLogos.includes(index)
+                                                ? "border-blue-400 bg-blue-50"
+                                                : "hover:border-gray-300"
+                                    } ${!logo.visible ? "opacity-50" : ""}`}
+                                    onClick={() => setSelectedLogoIndex(index)}
+                                >
+                                  <div className="relative w-12 h-12">
+                                    {logo.url && (
+                                        <Image
+                                            src={logo.url || "/placeholder.svg"}
+                                            alt={`Logo ${index + 1}`}
+                                            fill
+                                            className="object-contain"
+                                            style={{ filter: getLogoFilterStyle(logo.filters) }}
+                                        />
+                                    )}
+                                    {logo.locked && <Lock className="absolute top-0 right-0 h-3 w-3 text-red-500" />}
+                                  </div>
+                                </div>
+                            ))}
+                          </div>
+
+                          <div className="flex flex-col gap-2">
+                            <input
+                                type="file"
+                                id="logo-upload-side"
+                                accept="image/*"
+                                onChange={handleImageUpload}
+                                className="hidden"
+                                disabled={isUploading}
+                            />
+                            <label htmlFor="logo-upload-side">
+                              <Button variant="outline" className="w-full gap-2" asChild disabled={isUploading}>
+                            <span>
+                              {isUploading ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                                  </>
+                              ) : (
+                                  <>
+                                    <Upload className="h-4 w-4" /> Upload New Logo
+                                  </>
+                              )}
+                            </span>
+                              </Button>
+                            </label>
+
+                            {selectedLogo && (
+                                <>
+                                  <Button variant="outline" onClick={resetLogo} className="gap-2">
+                                    <RotateCcw className="h-4 w-4" /> Reset Position
+                                  </Button>
+                                  <Button
+                                      variant="outline"
+                                      onClick={removeLogo}
+                                      className="gap-2 text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" /> Remove Logo
+                                  </Button>
+                                </>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      {selectedLogo && (
+                          <Card>
+                            <CardHeader>
+                              <CardTitle>Logo Settings</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                {selectedLogo.url && (
+                                    <Image
+                                        src={selectedLogo.url || "/placeholder.svg"}
+                                        alt="Selected logo"
+                                        fill
+                                        className="object-contain"
+                                        style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
+                                    />
+                                )}
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm">Size</span>
+                                  <div className="flex items-center gap-2">
+                                    <ZoomIn className="h-4 w-4 text-gray-500" />
+                                    <span className="text-sm">{selectedLogo.size}%</span>
+                                  </div>
+                                </div>
+                                <Slider
+                                    value={[selectedLogo.size]}
+                                    min={5}
+                                    max={100}
+                                    step={1}
+                                    onValueChange={(value) => updateLogoSize(value[0])}
+                                />
+                              </div>
+
+                              <div className="space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-sm">Rotation</span>
+                                  <span className="text-sm">{selectedLogo.rotation}°</span>
+                                </div>
+                                <Slider
+                                    value={[selectedLogo.rotation]}
+                                    min={0}
+                                    max={360}
+                                    step={1}
+                                    onValueChange={(value) => updateLogoRotation(value[0])}
+                                />
+                              </div>
+
+                              <div className="flex items-center space-x-2">
+                                <Switch
+                                    id="maintain-aspect"
+                                    checked={selectedLogo.maintainAspectRatio}
+                                    onCheckedChange={toggleMaintainAspectRatio}
+                                />
+                                <Label htmlFor="maintain-aspect">Maintain aspect ratio</Label>
+                              </div>
+
+                              <div className="flex items-center gap-2 text-sm text-gray-600">
+                                <Move className="h-4 w-4" />
+                                <span>Drag logo on canvas to position</span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div className="space-y-1">
+                                  <Label htmlFor="position-x">X Position</Label>
+                                  <Input
+                                      id="position-x"
+                                      type="number"
+                                      value={Math.round(selectedLogo.position.x)}
+                                      onChange={(e) => updateLogoPosition(Number(e.target.value), selectedLogo.position.y)}
+                                      min={0}
+                                      max={100}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <Label htmlFor="position-y">Y Position</Label>
+                                  <Input
+                                      id="position-y"
+                                      type="number"
+                                      value={Math.round(selectedLogo.position.y)}
+                                      onChange={(e) => updateLogoPosition(selectedLogo.position.x, Number(e.target.value))}
+                                      min={0}
+                                      max={100}
+                                  />
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="layers" className="space-y-6 pt-4">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="flex items-center gap-2">
+                            <Layers className="h-5 w-5" /> Layer Management
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          {logos
+                              .map((logo, index) => ({ logo, index }))
+                              .sort((a, b) => b.logo.zIndex - a.logo.zIndex)
+                              .map(({ logo, index }) => (
+                                  <div
+                                      key={logo.id}
+                                      className={`flex items-center gap-2 p-2 border rounded-lg ${
+                                          selectedLogoIndex === index ? "border-primary bg-primary/5" : ""
+                                      }`}
+                                      onClick={() => setSelectedLogoIndex(index)}
+                                  >
+                                    <div className="relative w-8 h-8 flex-shrink-0">
+                                      {logo.url && (
+                                          <Image
+                                              src={logo.url || "/placeholder.svg"}
+                                              alt={`Layer ${index + 1}`}
+                                              fill
+                                              className="object-contain rounded"
+                                          />
+                                      )}
+                                    </div>
+
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-medium truncate">Logo {index + 1}</p>
+                                      <p className="text-xs text-gray-500">Z-Index: {logo.zIndex}</p>
+                                    </div>
+
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            toggleLayerVisibility(index)
+                                          }}
+                                      >
+                                        {logo.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                      </Button>
+
+                                      <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            toggleLayerLock(index)
+                                          }}
+                                      >
+                                        {logo.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                                      </Button>
+
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="sm">
+                                            <MoreHorizontal className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent>
+                                          <DropdownMenuItem onClick={() => moveLayerUp(index)}>
+                                            <ChevronUp className="h-4 w-4 mr-2" />
+                                            Bring Forward
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => moveLayerDown(index)}>
+                                            <ChevronDown className="h-4 w-4 mr-2" />
+                                            Send Backward
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => bringToFront(index)}>
+                                            Bring to Front
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => sendToBack(index)}>Send to Back</DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </div>
+                                  </div>
+                              ))}
+
+                          {logos.length === 0 && (
+                              <div className="text-center py-8 text-gray-500">
+                                <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                                <p>No layers yet. Add some logos to get started!</p>
+                              </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+
+                    <TabsContent value="colors" className="space-y-6 pt-4">
+                      {selectedLogo ? (
+                          <Card>
+                            <CardHeader>
+                              <CardTitle className="flex items-center gap-2">
+                                <Palette className="h-5 w-5" /> Logo Color Adjustments
+                              </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                              <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                {selectedLogo.url && (
+                                    <Image
+                                        src={selectedLogo.url || "/placeholder.svg"}
+                                        alt="Selected logo"
+                                        fill
+                                        className="object-contain"
+                                        style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
+                                    />
+                                )}
+                              </div>
+
+                              <div className="space-y-4">
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                              <span className="text-sm flex items-center gap-1">
+                                <SunMedium className="h-4 w-4" /> Brightness
+                              </span>
+                                    <span className="text-sm">{selectedLogo.filters.brightness}%</span>
+                                  </div>
+                                  <Slider
+                                      value={[selectedLogo.filters.brightness]}
+                                      min={0}
+                                      max={200}
+                                      step={1}
+                                      onValueChange={(value) => updateLogoFilter("brightness", value[0])}
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                              <span className="text-sm flex items-center gap-1">
+                                <Contrast className="h-4 w-4" /> Contrast
+                              </span>
+                                    <span className="text-sm">{selectedLogo.filters.contrast}%</span>
+                                  </div>
+                                  <Slider
+                                      value={[selectedLogo.filters.contrast]}
+                                      min={0}
+                                      max={200}
+                                      step={1}
+                                      onValueChange={(value) => updateLogoFilter("contrast", value[0])}
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm">Hue Rotation</span>
+                                    <span className="text-sm">{selectedLogo.filters.hue}°</span>
+                                  </div>
+                                  <Slider
+                                      value={[selectedLogo.filters.hue]}
+                                      min={0}
+                                      max={360}
+                                      step={1}
+                                      onValueChange={(value) => updateLogoFilter("hue", value[0])}
+                                  />
+                                </div>
+
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm">Saturation</span>
+                                    <span className="text-sm">{selectedLogo.filters.saturation}%</span>
+                                  </div>
+                                  <Slider
+                                      value={[selectedLogo.filters.saturation]}
+                                      min={0}
+                                      max={200}
+                                      step={1}
+                                      onValueChange={(value) => updateLogoFilter("saturation", value[0])}
+                                  />
+                                </div>
+
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                      if (selectedLogoIndex === null) return
+                                      const newLogos = [...logos]
+                                      newLogos[selectedLogoIndex] = {
+                                        ...newLogos[selectedLogoIndex],
+                                        filters: {
+                                          brightness: 100,
+                                          contrast: 100,
+                                          hue: 0,
+                                          saturation: 100,
+                                        },
+                                      }
+                                      setLogos(newLogos)
+                                    }}
+                                    className="w-full"
+                                >
+                                  Reset Color Adjustments
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                      ) : (
+                          <Card>
+                            <CardContent className="p-6 text-center">
+                              <Palette className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                              <p className="text-gray-500">Select a logo to adjust its colors</p>
+                            </CardContent>
+                          </Card>
+                      )}
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Color Presets</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                                variant="outline"
+                                className="h-auto py-3"
+                                onClick={() => {
+                                  if (selectedLogoIndex === null) return
+                                  const newLogos = [...logos]
+                                  newLogos[selectedLogoIndex] = {
+                                    ...newLogos[selectedLogoIndex],
+                                    filters: {
+                                      brightness: 100,
+                                      contrast: 120,
+                                      hue: 0,
+                                      saturation: 110,
+                                    },
+                                  }
+                                  setLogos(newLogos)
+                                }}
+                                disabled={!selectedLogo}
+                            >
+                              <div className="flex flex-col items-center">
+                                <span className="font-medium">Vibrant</span>
+                                <span className="text-xs text-gray-500">High contrast</span>
+                              </div>
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                className="h-auto py-3"
+                                onClick={() => {
+                                  if (selectedLogoIndex === null) return
+                                  const newLogos = [...logos]
+                                  newLogos[selectedLogoIndex] = {
+                                    ...newLogos[selectedLogoIndex],
+                                    filters: {
+                                      brightness: 110,
+                                      contrast: 90,
+                                      hue: 0,
+                                      saturation: 80,
+                                    },
+                                  }
+                                  setLogos(newLogos)
+                                }}
+                                disabled={!selectedLogo}
+                            >
+                              <div className="flex flex-col items-center">
+                                <span className="font-medium">Soft</span>
+                                <span className="text-xs text-gray-500">Muted colors</span>
+                              </div>
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                className="h-auto py-3"
+                                onClick={() => {
+                                  if (selectedLogoIndex === null) return
+                                  const newLogos = [...logos]
+                                  newLogos[selectedLogoIndex] = {
+                                    ...newLogos[selectedLogoIndex],
+                                    filters: {
+                                      brightness: 100,
+                                      contrast: 100,
+                                      hue: 180,
+                                      saturation: 100,
+                                    },
+                                  }
+                                  setLogos(newLogos)
+                                }}
+                                disabled={!selectedLogo}
+                            >
+                              <div className="flex flex-col items-center">
+                                <span className="font-medium">Invert Hue</span>
+                                <span className="text-xs text-gray-500">Opposite colors</span>
+                              </div>
+                            </Button>
+
+                            <Button
+                                variant="outline"
+                                className="h-auto py-3"
+                                onClick={() => {
+                                  if (selectedLogoIndex === null) return
+                                  const newLogos = [...logos]
+                                  newLogos[selectedLogoIndex] = {
+                                    ...newLogos[selectedLogoIndex],
+                                    filters: {
+                                      brightness: 120,
+                                      contrast: 110,
+                                      hue: 0,
+                                      saturation: 0,
+                                    },
+                                  }
+                                  setLogos(newLogos)
+                                }}
+                                disabled={!selectedLogo}
+                            >
+                              <div className="flex flex-col items-center">
+                                <span className="font-medium">Grayscale</span>
+                                <span className="text-xs text-gray-500">Black & white</span>
+                              </div>
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+
+                    <TabsContent value="export" className="space-y-6 pt-4">
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Canvas Information</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-2">
+                          <div className="flex justify-between">
+                            <span className="text-sm text-gray-600">Canvas Size:</span>
+                            <span className="text-sm font-medium">
+                          {canvasSize.width} × {canvasSize.height}px
+                        </span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-sm text-gray-600">Elements:</span>
+                            <span className="text-sm font-medium">{logos.length} logos</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span className="text-sm text-gray-600">Visible Elements:</span>
+                            <span className="text-sm font-medium">{logos.filter((l) => l.visible).length}</span>
+                          </div>
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        <CardHeader>
+                          <CardTitle>Export Settings</CardTitle>
+                          <CardDescription>Download your mockup in high quality</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="export-format">Export Format</Label>
+                            <Select defaultValue="png">
+                              <SelectTrigger id="export-format">
+                                <SelectValue placeholder="Select format" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="png">PNG Image</SelectItem>
+                                <SelectItem value="jpg">JPG Image</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="export-quality">Image Quality</Label>
+                            <Select defaultValue="high">
+                              <SelectTrigger id="export-quality">
+                                <SelectValue placeholder="Select quality" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="low">Low (72 DPI)</SelectItem>
+                                <SelectItem value="medium">Medium (150 DPI)</SelectItem>
+                                <SelectItem value="high">High (300 DPI)</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <Button onClick={handleDownload} className="w-full gap-2" disabled={isDownloading}>
+                            {isDownloading ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
+                                </>
+                            ) : (
+                                <>
+                                  <Download className="h-4 w-4" /> Download Mockup
+                                </>
+                            )}
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+            )}
+          </div>
+        </main>
+
+        <LoginModal open={showAuthModal} onOpenChange={handleAuthModalClose} onSuccess={handleAuthSuccess} />
+
+        {/* Save Design Dialog */}
+        <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Save Design</DialogTitle>
+              <DialogDescription>Give your design a name to save it to your recent projects.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="design-name">Design Name</Label>
+                <Input
+                    id="design-name"
+                    value={currentDesignName}
+                    onChange={(e) => setCurrentDesignName(e.target.value)}
+                    placeholder="My Awesome Design"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => saveCurrentDesign()} className="flex-1" disabled={isSaving}>
+                  {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Saving...
+                      </>
+                  ) : (
+                      "Save Design"
+                  )}
+                </Button>
+                <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Design History Modal */}
+        <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+          <DialogContent className="sm:max-w-4xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Clock className="h-5 w-5" />
+                Recent Designs
+              </DialogTitle>
+              <DialogDescription>Continue where you left off or start fresh with a previous design.</DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {!Array.isArray(designHistory) || designHistory.length === 0 ? (
+                  <div className="text-center py-8">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <h3 className="text-lg font-semibold mb-2">No Recent Designs</h3>
+                    <p className="text-gray-600">Start creating your first design to see it here!</p>
+                  </div>
+              ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {designHistory.map((design: DesignData) => (
+                        <Card key={design.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                          <CardContent className="p-4">
+                            <div className="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden relative">
+                              {designThumbnails[design.id] ? (
+                                  <Image
+                                      src={designThumbnails[design.id] || "/placeholder.svg"}
+                                      alt={`Preview of ${design.name}`}
+                                      fill
+                                      className="object-cover"
+                                  />
+                              ) : (
+                                  <div className="w-full h-full flex items-center justify-center">
+                                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                                  </div>
+                              )}
+
+                              {/* Template badge */}
+                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                {templateNames[design.data.selectedTemplate] || design.data.selectedTemplate}
+                              </div>
+
+                              {/* Logo count badge */}
+                              {design.data.logos && design.data.logos.length > 0 && (
+                                  <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
+                                    {design.data.logos.length} logo{design.data.logos.length !== 1 ? "s" : ""}
+                                  </div>
+                              )}
+                            </div>
+
+                            <div className="space-y-2">
+                              <h4 className="font-semibold truncate">{design.name}</h4>
+                              <div className="text-xs text-gray-500 space-y-1">
+                                <div className="flex items-center gap-1">
+                                  <Calendar className="h-3 w-3" />
+                                  Created: {new Date(design.createdAt).toLocaleDateString()}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Clock className="h-3 w-3" />
+                                  Updated: {new Date(design.updatedAt).toLocaleDateString()}
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <Maximize2 className="h-3 w-3" />
+                                  {design.data.canvasSize?.width || 800} × {design.data.canvasSize?.height || 600}px
+                                </div>
+                              </div>
+
+                              <div className="flex gap-2 pt-2">
+                                <Button size="sm" onClick={() => loadDesign(design)} className="flex-1">
+                                  <FileText className="h-3 w-3 mr-1" />
+                                  Load
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      deleteDesign(design.id)
+                                    }}
+                                >
+                                  <Trash className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                    ))}
+                  </div>
+              )}
+
+              <div className="flex justify-end pt-4 border-t">
+                <Button variant="outline" onClick={() => setShowHistoryModal(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
   )
 }

@@ -40,7 +40,7 @@ export default function Home() {
     {
       icon: Upload,
       title: "Upload Your Logo",
-      description: "Simply upload your existing logo or design in PNG/JPG format",
+      description: "Simply upload your existing logo or designs in PNG/JPG format",
     },
     {
       icon: Move,
