@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Package, Menu, X, User, LogOut } from "lucide-react"
+import { Package, Menu, X, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { useAuth } from "@/lib/auth-context"
@@ -33,6 +33,7 @@ export default function SiteHeader() {
         { name: "Home", path: "/" },
         { name: "Editor", path: "/editor" },
         { name: "Logo Designer", path: "/logo-designer" },
+        { name: "Wax Paper", path: "/wax-paper" },
     ]
 
     const getInitials = (firstName: string, lastName: string) => {

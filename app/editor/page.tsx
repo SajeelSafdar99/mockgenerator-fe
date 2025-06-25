@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect } from "react"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
@@ -43,9 +42,9 @@ import {
   Trash,
   Calendar,
   FileText,
+  Package,
 } from "lucide-react"
 import { useIsMobile as useMobile } from "@/hooks/use-mobile"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -66,6 +65,7 @@ import { Separator } from "@/components/ui/separator"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth-context"
 import LoginModal from "@/components/login-modal"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 
 // Define logo data structure with enhanced properties
 interface LogoData {
@@ -89,6 +89,27 @@ interface LogoData {
   }
 }
 
+// Template layer data structure
+interface TemplateLayer {
+  id: string
+  name: string
+  type: "template"
+  visible: boolean
+  locked: boolean
+  zIndex: number
+  position: { x: number; y: number }
+  size: number
+  rotation: number
+  aspectRatio: number
+  maintainAspectRatio: boolean
+  filters: {
+    brightness: number
+    contrast: number
+    hue: number
+    saturation: number
+  }
+}
+
 // Design data structure for saving/loading
 interface DesignData {
   id: string
@@ -99,9 +120,13 @@ interface DesignData {
   data: {
     selectedTemplate: string
     logos: LogoData[]
+    templateLayer: TemplateLayer
     canvasSize: { width: number; height: number }
     waxEffect: any
     templateColor: string
+    // Add these fields to preserve AI-generated template data
+    templateImages?: Record<string, string>
+    templateNames?: Record<string, string>
   }
 }
 
@@ -170,12 +195,41 @@ export default function EditorPage() {
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [currentDesignName, setCurrentDesignName] = useState("")
   const [showSaveDialog, setShowSaveDialog] = useState(false)
-
   const [isSaving, setIsSaving] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [currentDesignId, setCurrentDesignId] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [designThumbnails, setDesignThumbnails] = useState<Record<string, string>>({})
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [hasShownInitialSavePrompt, setHasShownInitialSavePrompt] = useState(false)
+
+  // Template AI Generator
+  const [templatePrompt, setTemplatePrompt] = useState("")
+  const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false)
+  const [generatedTemplates, setGeneratedTemplates] = useState<string[]>([])
+
+  // Template Layer
+  const [templateLayer, setTemplateLayer] = useState<TemplateLayer>({
+    id: "template-layer",
+    name: "Template Background",
+    type: "template",
+    visible: true,
+    locked: false,
+    zIndex: 0,
+    position: { x: 50, y: 50 },
+    size: 80,
+    rotation: 0,
+    aspectRatio: 1,
+    maintainAspectRatio: true,
+    filters: {
+      brightness: 100,
+      contrast: 100,
+      hue: 0,
+      saturation: 100,
+    },
+  })
+  const [selectedLayer, setSelectedLayer] = useState<"template" | number | null>(null)
 
   // Add this near the top of the component with other refs
   const userRef = useRef(user)
@@ -205,19 +259,37 @@ export default function EditorPage() {
   }, [user, loading])
 
   // Template data mapping
-  const templateImages: Record<string, string> = {
+  // Replace this line:
+  // const templateImages: Record<string, string> = {
+  //   box: "/product-box.png??key=lkdoe",
+  //   cup: "/cup.png?key=7tclj",
+  //   bag: "/bag.jpg?key=yfvyb",
+  //   container: "/food-container.webp?key=pbzx5",
+  // }
+
+  // With this:
+  const [templateImages, setTemplateImages] = useState<Record<string, string>>({
     box: "/product-box.png??key=lkdoe",
     cup: "/cup.png?key=7tclj",
     bag: "/bag.jpg?key=yfvyb",
     container: "/food-container.webp?key=pbzx5",
-  }
+  })
 
-  const templateNames: Record<string, string> = {
+  // Replace this line:
+  // const templateNames: Record<string, string> = {
+  //   box: "Product Box",
+  //   cup: "Coffee Cup",
+  //   bag: "Shopping Bag",
+  //   container: "Food Container",
+  // }
+
+  // With this:
+  const [templateNames, setTemplateNames] = useState<Record<string, string>>({
     box: "Product Box",
     cup: "Coffee Cup",
     bag: "Shopping Bag",
     container: "Food Container",
-  }
+  })
 
   // Get the currently selected logo
   const selectedLogo = selectedLogoIndex !== null ? logos[selectedLogoIndex] : null
@@ -260,6 +332,8 @@ export default function EditorPage() {
     })
     setSelectedLogoIndex(logos.length)
     setShowWelcome(false)
+    setHasUnsavedChanges(true)
+
     toast({
       title: "Logo Added!",
       description: "Your logo has been added to the canvas. Drag it to position it perfectly.",
@@ -340,6 +414,64 @@ export default function EditorPage() {
     const newLogos = [...logos]
     newLogos[index].locked = !newLogos[index].locked
     setLogos(newLogos)
+  }
+
+  // Template layer functions
+  const toggleTemplateVisibility = () => {
+    setTemplateLayer((prev) => ({ ...prev, visible: !prev.visible }))
+  }
+
+  const toggleTemplateLock = () => {
+    setTemplateLayer((prev) => ({ ...prev, locked: !prev.locked }))
+  }
+
+  const updateTemplateFilter = (filter: keyof TemplateLayer["filters"], value: number) => {
+    setTemplateLayer((prev) => ({
+      ...prev,
+      filters: {
+        ...prev.filters,
+        [filter]: value,
+      },
+    }))
+    setHasUnsavedChanges(true)
+  }
+
+  const updateTemplateSize = (size: number) => {
+    setTemplateLayer((prev) => ({ ...prev, size }))
+    setHasUnsavedChanges(true)
+  }
+
+  const updateTemplateRotation = (rotation: number) => {
+    setTemplateLayer((prev) => ({ ...prev, rotation }))
+    setHasUnsavedChanges(true)
+  }
+
+  const updateTemplatePosition = (x: number, y: number) => {
+    setTemplateLayer((prev) => ({ ...prev, position: { x, y } }))
+    setHasUnsavedChanges(true)
+  }
+
+  const toggleTemplateMaintainAspectRatio = () => {
+    setTemplateLayer((prev) => ({ ...prev, maintainAspectRatio: !prev.maintainAspectRatio }))
+  }
+
+  const resetTemplate = () => {
+    setTemplateLayer((prev) => ({
+      ...prev,
+      position: { x: 50, y: 50 },
+      size: 80,
+      rotation: 0,
+      filters: {
+        brightness: 100,
+        contrast: 100,
+        hue: 0,
+        saturation: 100,
+      },
+    }))
+    toast({
+      title: "Template Reset",
+      description: "Template position and settings have been reset to default.",
+    })
   }
 
   // Alignment functions
@@ -623,11 +755,17 @@ export default function EditorPage() {
       e.target.value = ""
     }
   }
+
   // Enhanced drag and resize handlers
   const handleDragStart = (e: React.MouseEvent | React.TouchEvent, logoIndex: number) => {
     if (logos[logoIndex].locked) return
 
+    // Prevent event bubbling to canvas and template
+    e.stopPropagation()
+
     setSelectedLogoIndex(logoIndex)
+    setSelectedLayer(logoIndex)
+    setSelectedLogos([logoIndex])
     setIsDragging(true)
 
     let clientX: number, clientY: number
@@ -677,50 +815,94 @@ export default function EditorPage() {
     const rect = containerRef.current.getBoundingClientRect()
 
     if (isDragging) {
-      let x = ((clientX - rect.left - dragOffset.x) / rect.width) * 100
-      let y = ((clientY - rect.top - dragOffset.y) / rect.height) * 100
+      // Only move template if template is specifically selected
+      if (selectedLayer === "template" && !templateLayer.locked) {
+        let x = ((clientX - rect.left - dragOffset.x) / rect.width) * 100
+        let y = ((clientY - rect.top - dragOffset.y) / rect.height) * 100
 
-      // Snap to grid if enabled
-      if (snapToGrid) {
-        const gridSize = 5 // 5% grid
-        x = Math.round(x / gridSize) * gridSize
-        y = Math.round(y / gridSize) * gridSize
-      }
+        // Snap to grid if enabled
+        if (snapToGrid) {
+          const gridSize = 5 // 5% grid
+          x = Math.round(x / gridSize) * gridSize
+          y = Math.round(y / gridSize) * gridSize
+        }
 
-      const newLogos = [...logos]
-      newLogos[selectedLogoIndex] = {
-        ...newLogos[selectedLogoIndex],
-        position: {
-          x: Math.max(0, Math.min(100, x)),
-          y: Math.max(0, Math.min(100, y)),
-        },
+        setTemplateLayer((prev) => ({
+          ...prev,
+          position: {
+            x: Math.max(0, Math.min(100, x)),
+            y: Math.max(0, Math.min(100, y)),
+          },
+        }))
       }
-      setLogos(newLogos)
+      // Only move logo if a logo is selected
+      else if (selectedLogoIndex !== null && selectedLayer !== "template") {
+        let x = ((clientX - rect.left - dragOffset.x) / rect.width) * 100
+        let y = ((clientY - rect.top - dragOffset.y) / rect.height) * 100
+
+        // Snap to grid if enabled
+        if (snapToGrid) {
+          const gridSize = 5 // 5% grid
+          x = Math.round(x / gridSize) * gridSize
+          y = Math.round(y / gridSize) * gridSize
+        }
+
+        const newLogos = [...logos]
+        newLogos[selectedLogoIndex] = {
+          ...newLogos[selectedLogoIndex],
+          position: {
+            x: Math.max(0, Math.min(100, x)),
+            y: Math.max(0, Math.min(100, y)),
+          },
+        }
+        setLogos(newLogos)
+      }
     } else if (isResizing && resizeHandle) {
-      const logo = logos[selectedLogoIndex]
-      const centerX = (rect.width * logo.position.x) / 100
-      const centerY = (rect.height * logo.position.y) / 100
+      if (selectedLayer === "template" && !templateLayer.locked) {
+        const centerX = (rect.width * templateLayer.position.x) / 100
+        const centerY = (rect.height * templateLayer.position.y) / 100
 
-      const deltaX = clientX - rect.left - centerX
-      const deltaY = clientY - rect.top - centerY
+        const deltaX = clientX - rect.left - centerX
+        const deltaY = clientY - rect.top - centerY
 
-      let newSize = logo.size
+        let newSize = templateLayer.size
 
-      if (resizeHandle.includes("right")) {
-        newSize = Math.max(5, Math.min(100, (Math.abs(deltaX) / rect.width) * 200))
-      } else if (resizeHandle.includes("bottom")) {
-        newSize = Math.max(5, Math.min(100, (Math.abs(deltaY) / rect.height) * 200))
-      } else if (resizeHandle.includes("corner")) {
-        const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
-        newSize = Math.max(5, Math.min(100, (distance / rect.width) * 200))
+        if (resizeHandle.includes("right")) {
+          newSize = Math.max(10, Math.min(150, (Math.abs(deltaX) / rect.width) * 200))
+        } else if (resizeHandle.includes("bottom")) {
+          newSize = Math.max(10, Math.min(150, (Math.abs(deltaY) / rect.height) * 200))
+        } else if (resizeHandle.includes("corner")) {
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+          newSize = Math.max(10, Math.min(150, (distance / rect.width) * 200))
+        }
+
+        setTemplateLayer((prev) => ({ ...prev, size: newSize }))
+      } else if (selectedLogoIndex !== null) {
+        const logo = logos[selectedLogoIndex]
+        const centerX = (rect.width * logo.position.x) / 100
+        const centerY = (rect.height * logo.position.y) / 100
+
+        const deltaX = clientX - rect.left - centerX
+        const deltaY = clientY - rect.top - centerY
+
+        let newSize = logo.size
+
+        if (resizeHandle.includes("right")) {
+          newSize = Math.max(5, Math.min(100, (Math.abs(deltaX) / rect.width) * 200))
+        } else if (resizeHandle.includes("bottom")) {
+          newSize = Math.max(5, Math.min(100, (Math.abs(deltaY) / rect.height) * 200))
+        } else if (resizeHandle.includes("corner")) {
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY)
+          newSize = Math.max(5, Math.min(100, (distance / rect.width) * 200))
+        }
+
+        const newLogos = [...logos]
+        newLogos[selectedLogoIndex] = {
+          ...newLogos[selectedLogoIndex],
+          size: newSize,
+        }
+        setLogos(newLogos)
       }
-
-      const newLogos = [...logos]
-      newLogos[selectedLogoIndex] = {
-        ...newLogos[selectedLogoIndex],
-        size: newSize,
-      }
-      setLogos(newLogos)
     }
   }
 
@@ -740,6 +922,7 @@ export default function EditorPage() {
       size,
     }
     setLogos(newLogos)
+    setHasUnsavedChanges(true)
   }
 
   const updateLogoRotation = (rotation: number) => {
@@ -751,6 +934,7 @@ export default function EditorPage() {
       rotation,
     }
     setLogos(newLogos)
+    setHasUnsavedChanges(true)
   }
 
   const updateLogoPosition = (x: number, y: number) => {
@@ -762,6 +946,7 @@ export default function EditorPage() {
       position: { x, y },
     }
     setLogos(newLogos)
+    setHasUnsavedChanges(true)
   }
 
   const updateLogoFilter = (filter: keyof LogoData["filters"], value: number) => {
@@ -776,6 +961,7 @@ export default function EditorPage() {
       },
     }
     setLogos(newLogos)
+    setHasUnsavedChanges(true)
   }
 
   const toggleMaintainAspectRatio = () => {
@@ -896,7 +1082,12 @@ export default function EditorPage() {
         templateImg.src = templateImages[selectedTemplate]
 
         templateImg.onload = () => {
-          ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
+          if (templateLayer.visible) {
+            ctx.save()
+            ctx.filter = getTemplateFilterStyle(templateLayer.filters)
+            ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
+            ctx.restore()
+          }
 
           // Sort logos by z-index and render visible ones
           const sortedLogos = logos
@@ -989,7 +1180,7 @@ export default function EditorPage() {
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
 
-    // Check if click is on any logo
+    // Check if click is on any logo first (logos have higher priority)
     let clickedLogoIndex = -1
 
     // Sort by z-index (highest first) to select topmost element
@@ -1003,14 +1194,36 @@ export default function EditorPage() {
       const logoWidth = (rect.width * logo.size) / 100
       const logoHeight = logoWidth / logo.aspectRatio
 
+      // Add some padding to make logo selection easier
+      const padding = 10
       if (
-          x >= logoX - logoWidth / 2 &&
-          x <= logoX + logoWidth / 2 &&
-          y >= logoY - logoHeight / 2 &&
-          y <= logoY + logoHeight / 2
+          x >= logoX - logoWidth / 2 - padding &&
+          x <= logoX + logoWidth / 2 + padding &&
+          y >= logoY - logoHeight / 2 - padding &&
+          y <= logoY + logoHeight / 2 + padding
       ) {
         clickedLogoIndex = index
         break
+      }
+    }
+
+    // If no logo was clicked, check template
+    let clickedTemplate = false
+    if (clickedLogoIndex === -1 && templateLayer.visible) {
+      const templateX = (rect.width * templateLayer.position.x) / 100
+      const templateY = (rect.height * templateLayer.position.y) / 100
+      const templateWidth = (rect.width * templateLayer.size) / 100
+      const templateHeight = templateLayer.maintainAspectRatio
+          ? templateWidth / templateLayer.aspectRatio
+          : templateWidth
+
+      if (
+          x >= templateX - templateWidth / 2 &&
+          x <= templateX + templateWidth / 2 &&
+          y >= templateY - templateHeight / 2 &&
+          y <= templateY + templateHeight / 2
+      ) {
+        clickedTemplate = true
       }
     }
 
@@ -1023,11 +1236,20 @@ export default function EditorPage() {
       }
     } else {
       if (clickedLogoIndex !== -1) {
+        // Logo clicked - select logo
         setSelectedLogoIndex(clickedLogoIndex)
         setSelectedLogos([clickedLogoIndex])
-      } else {
+        setSelectedLayer(clickedLogoIndex)
+      } else if (clickedTemplate) {
+        // Template clicked - select template
         setSelectedLogoIndex(null)
         setSelectedLogos([])
+        setSelectedLayer("template")
+      } else {
+        // Empty space clicked - deselect all
+        setSelectedLogoIndex(null)
+        setSelectedLogos([])
+        setSelectedLayer(null)
       }
     }
   }
@@ -1036,7 +1258,116 @@ export default function EditorPage() {
   const toggleLeftPanel = () => setShowLeftPanel(!showLeftPanel)
   const toggleRightPanel = () => setShowRightPanel(!showRightPanel)
 
-  // AI logo generation
+  // Template AI generation
+  const addGeneratedTemplate = (url: string) => {
+    console.log("🎨 Adding generated template:", url)
+    // Add to template images with a unique ID
+    const templateId = `generated-${Date.now()}`
+
+    // Update state instead of mutating objects
+    setTemplateImages((prev) => ({
+      ...prev,
+      [templateId]: url,
+    }))
+
+    setTemplateNames((prev) => ({
+      ...prev,
+      [templateId]: "AI Generated Template",
+    }))
+
+    setSelectedTemplate(templateId)
+
+    // Load the image to get aspect ratio and ensure it's accessible
+    const img = new window.Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      const aspectRatio = img.width / img.height
+      console.log("🎨 Template loaded successfully with aspect ratio:", aspectRatio)
+      setTemplateLayer((prev) => ({
+        ...prev,
+        aspectRatio,
+      }))
+    }
+    img.onerror = (error) => {
+      console.error("🎨 Failed to load template image:", error)
+      // Fallback to a working placeholder
+      setTemplateImages((prev) => ({
+        ...prev,
+        [templateId]: `/placeholder.svg?height=400&width=400&text=${encodeURIComponent("AI Template")}`,
+      }))
+    }
+    img.src = url
+
+    setHasUnsavedChanges(true)
+
+    toast({
+      title: "Template Added!",
+      description: "Your AI-generated template has been applied to the canvas.",
+    })
+  }
+
+  const generateTemplateWithAI = async () => {
+    if (!templatePrompt.trim()) return
+
+    setIsGeneratingTemplates(true)
+
+    try {
+      // Direct Unsplash API call for templates
+      const response = await fetch(
+          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(templatePrompt + " product packaging mockup template")}&per_page=9&orientation=squarish&client_id=${process.env.NEXT_PUBLIC_UNSPLASH_ACCESS_KEY}`,
+          {
+            headers: {
+              "Accept-Version": "v1",
+            },
+          },
+      )
+
+      if (!response.ok) {
+        throw new Error(`Unsplash API error: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (data.results && data.results.length > 0) {
+        const newGeneratedTemplates = data.results.map((photo: any) => photo.urls.regular)
+        setGeneratedTemplates(newGeneratedTemplates)
+      } else {
+        // Fallback to placeholder images
+        const fallbackTemplates = [
+          `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 1")}`,
+          `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 2")}`,
+          `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 3")}`,
+        ]
+        setGeneratedTemplates(fallbackTemplates)
+      }
+
+      setIsGeneratingTemplates(false)
+
+      toast({
+        title: "AI Templates Generated!",
+        description: "Click on any generated template to use it in your design.",
+      })
+    } catch (error) {
+      console.error("Error generating templates:", error)
+      setIsGeneratingTemplates(false)
+
+      // Fallback to placeholder images if API fails
+      const fallbackTemplates = [
+        `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 1")}`,
+        `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 2")}`,
+        `/placeholder.svg?height=400&width=400&query=${encodeURIComponent(templatePrompt + " template 3")}`,
+      ]
+
+      setGeneratedTemplates(fallbackTemplates)
+
+      toast({
+        title: "Using Placeholder Images",
+        description: "Unable to fetch from Unsplash API. Using placeholder images instead.",
+        variant: "destructive",
+      })
+    }
+  }
+
   const generateLogoWithAI = async () => {
     if (!aiPrompt.trim()) return
 
@@ -1125,6 +1456,17 @@ export default function EditorPage() {
 
   // Load design history on component mount
   useEffect(() => {
+    window.addEventListener("mouseup", handleDragEnd)
+    window.addEventListener("touchend", handleDragEnd)
+
+    return () => {
+      window.removeEventListener("mouseup", handleDragEnd)
+      window.removeEventListener("touchend", handleDragEnd)
+    }
+  }, [])
+
+  // Load design history on component mount
+  useEffect(() => {
     if (user) {
       loadDesignHistory()
     }
@@ -1144,6 +1486,11 @@ export default function EditorPage() {
 
   // Get CSS filter string for a logo
   const getLogoFilterStyle = (filters: LogoData["filters"]) => {
+    return `brightness(${filters.brightness}%) contrast(${filters.contrast}%) hue-rotate(${filters.hue}deg) saturate(${filters.saturation}%)`
+  }
+
+  // Get CSS filter string for template
+  const getTemplateFilterStyle = (filters: TemplateLayer["filters"]) => {
     return `brightness(${filters.brightness}%) contrast(${filters.contrast}%) hue-rotate(${filters.hue}deg) saturate(${filters.saturation}%)`
   }
 
@@ -1235,9 +1582,21 @@ export default function EditorPage() {
         data: {
           selectedTemplate,
           logos: logosToSave,
+          templateLayer,
           canvasSize,
           waxEffect,
           templateColor,
+          // Include template images and names for AI-generated templates
+          templateImages: selectedTemplate.startsWith("generated-")
+              ? {
+                [selectedTemplate]: templateImages[selectedTemplate],
+              }
+              : undefined,
+          templateNames: selectedTemplate.startsWith("generated-")
+              ? {
+                [selectedTemplate]: templateNames[selectedTemplate],
+              }
+              : undefined,
         },
       }
 
@@ -1298,9 +1657,20 @@ export default function EditorPage() {
           data: {
             selectedTemplate,
             logos: logosToSave,
+            templateLayer,
             canvasSize,
             waxEffect,
             templateColor,
+            templateImages: selectedTemplate.startsWith("generated-")
+                ? {
+                  [selectedTemplate]: templateImages[selectedTemplate],
+                }
+                : undefined,
+            templateNames: selectedTemplate.startsWith("generated-")
+                ? {
+                  [selectedTemplate]: templateNames[selectedTemplate],
+                }
+                : undefined,
           },
         }
 
@@ -1325,6 +1695,12 @@ export default function EditorPage() {
 
       setCurrentDesignName(designName)
       setShowSaveDialog(false)
+      setHasUnsavedChanges(false) // Reset unsaved changes flag
+
+      toast({
+        title: "Design Saved!",
+        description: `"${designName}" has been saved successfully.`,
+      })
     } catch (error) {
       console.error("🎨 Save failed:", error)
       setSaveError("Failed to save design")
@@ -1350,6 +1726,26 @@ export default function EditorPage() {
       setTemplateColor(design.data.templateColor)
       setCurrentDesignName(design.name)
       setCurrentDesignId(design.id)
+
+      // Restore template layer if it exists
+      if (design.data.templateLayer) {
+        setTemplateLayer(design.data.templateLayer)
+      }
+
+      // Restore AI-generated template data if it exists
+      if (design.data.templateImages) {
+        setTemplateImages((prev) => ({
+          ...prev,
+          ...design.data.templateImages,
+        }))
+      }
+
+      if (design.data.templateNames) {
+        setTemplateNames((prev) => ({
+          ...prev,
+          ...design.data.templateNames,
+        }))
+      }
 
       // Restore logos with proper URL handling - only restore logos with valid URLs
       const restoredLogos = (design.data.logos || [])
@@ -1450,6 +1846,34 @@ export default function EditorPage() {
       // Load and draw template
       const templateImg = new window.Image()
       templateImg.crossOrigin = "anonymous"
+
+      // Get the template image URL - check both current state and saved design data
+      let templateImageUrl = null
+
+      // Add null checks for selectedTemplate
+      if (design.data?.selectedTemplate) {
+        templateImageUrl = templateImages[design.data.selectedTemplate]
+
+        // If not found in current state, check if it's saved in the design data
+        if (
+            !templateImageUrl &&
+            design.data.templateImages &&
+            design.data.templateImages[design.data.selectedTemplate]
+        ) {
+          templateImageUrl = design.data.templateImages[design.data.selectedTemplate]
+        }
+
+        // If still not found and it's an AI-generated template, use placeholder
+        if (!templateImageUrl && design.data.selectedTemplate.startsWith("generated-")) {
+          templateImageUrl = "/placeholder.svg?height=400&width=400&text=AI+Template"
+        }
+      }
+
+      // Fallback to default placeholder if no template found
+      if (!templateImageUrl) {
+        templateImageUrl = "/placeholder.svg?height=400&width=400&text=Design+Preview"
+      }
+
       templateImg.onload = () => {
         // Draw template
         ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
@@ -1501,11 +1925,9 @@ export default function EditorPage() {
       templateImg.onerror = () => {
         resolve("/placeholder.svg?height=200&width=200")
       }
-      templateImg.src = templateImages[design.data.selectedTemplate] || "/placeholder.svg"
+      templateImg.src = templateImageUrl
     })
   }
-
-  const [designThumbnails, setDesignThumbnails] = useState<Record<string, string>>({})
 
   const loadDesignHistory = async () => {
     if (!user) {
@@ -1596,6 +2018,51 @@ export default function EditorPage() {
       setDesignThumbnails(thumbnails)
     }
   }
+
+  // Track unsaved changes and prompt for saving - FIXED VERSION
+  useEffect(() => {
+    const hasChanges =
+        logos.length > 0 || selectedTemplate !== "box" || canvasSize.width !== 800 || canvasSize.height !== 600
+
+    if (hasChanges && user) {
+      setHasUnsavedChanges(true)
+
+      // Show save dialog when user makes ANY change and doesn't have a design ID
+      if (!currentDesignId && !hasShownInitialSavePrompt) {
+        setHasShownInitialSavePrompt(true)
+
+        const timer = setTimeout(() => {
+          setShowSaveDialog(true)
+          toast({
+            title: "Save Your Design",
+            description: "Give your design a name to keep your progress safe.",
+          })
+        }, 3000) // Show save dialog after 3 seconds of first change
+
+        return () => clearTimeout(timer)
+      }
+
+      // Auto-save existing designs after changes (but don't show dialog)
+      if (currentDesignId) {
+        const autoSaveTimer = setTimeout(() => {
+          saveCurrentDesign(currentDesignName || "Auto-save")
+        }, 2000)
+
+        return () => clearTimeout(autoSaveTimer)
+      }
+    }
+  }, [
+    logos,
+    selectedTemplate,
+    canvasSize,
+    templateColor,
+    waxEffect,
+    templateLayer,
+    user,
+    currentDesignId,
+    currentDesignName,
+    hasShownInitialSavePrompt,
+  ])
 
   // Debug effect to log logos state changes
   useEffect(() => {
@@ -1731,7 +2198,7 @@ export default function EditorPage() {
               </Button>
               <Button
                   variant="outline"
-                  className="gap-2"
+                  className={`gap-2 ${hasUnsavedChanges ? "bg-orange-50 border-orange-200 text-orange-700" : ""}`}
                   onClick={() => setShowSaveDialog(true)}
                   disabled={logos.length === 0 || isSaving || !user}
               >
@@ -1741,7 +2208,9 @@ export default function EditorPage() {
                     </>
                 ) : (
                     <>
-                      <Save className="h-4 w-4" /> Save
+                      <Save className="h-4 w-4" />
+                      {hasUnsavedChanges ? "Save Changes" : "Save"}
+                      {hasUnsavedChanges && <span className="w-2 h-2 bg-orange-500 rounded-full ml-1" />}
                     </>
                 )}
               </Button>
@@ -1756,14 +2225,14 @@ export default function EditorPage() {
                 gridTemplateColumns: `${showLeftPanel ? "320px" : "0px"} 1fr ${showRightPanel ? "320px" : "0px"}`,
               }}
           >
-            {/* Left Panel - Templates & AI */}
+            {/* Left Panel - Templates & Template AI */}
             {showLeftPanel && (
                 <div className="space-y-6 transition-all duration-300">
                   {/* Template Selection */}
                   <Card>
                     <CardHeader>
                       <CardTitle className="flex items-center gap-2">
-                        <Layers className="h-5 w-5" /> Templates
+                        <Package className="h-5 w-5" /> Templates
                       </CardTitle>
                       <CardDescription>Choose a template to start designing your mockup</CardDescription>
                     </CardHeader>
@@ -1773,7 +2242,10 @@ export default function EditorPage() {
                             <div
                                 key={id}
                                 className={`border rounded-lg p-2 cursor-pointer transition-all hover:border-primary ${selectedTemplate === id ? "border-primary bg-primary/5" : ""}`}
-                                onClick={() => setSelectedTemplate(id)}
+                                onClick={() => {
+                                  setSelectedTemplate(id)
+                                  setHasUnsavedChanges(true)
+                                }}
                             >
                               <div className="relative w-full aspect-square mb-1">
                                 <Image
@@ -1787,6 +2259,85 @@ export default function EditorPage() {
                             </div>
                         ))}
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Template AI Generator */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Sparkles className="h-5 w-5" /> AI Template Generator
+                      </CardTitle>
+                      <CardDescription>Generate template ideas using AI</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="template-prompt">Describe your template</Label>
+                        <Textarea
+                            id="template-prompt"
+                            placeholder="E.g., A modern product box with clean design"
+                            value={templatePrompt}
+                            onChange={(e) => setTemplatePrompt(e.target.value)}
+                        />
+                      </div>
+
+                      <Button
+                          onClick={generateTemplateWithAI}
+                          className="w-full gap-2"
+                          disabled={!templatePrompt.trim() || isGeneratingTemplates}
+                      >
+                        <Sparkles className="h-4 w-4" />
+                        {isGeneratingTemplates ? "Generating..." : "Generate Template Ideas"}
+                      </Button>
+
+                      <div className="text-xs text-gray-500">
+                        Example prompts:
+                        <ul className="mt-1 space-y-1">
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setTemplatePrompt("Modern minimalist product packaging box")}
+                          >
+                            • Modern minimalist packaging
+                          </li>
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setTemplatePrompt("Vintage style coffee cup mockup")}
+                          >
+                            • Vintage coffee cup
+                          </li>
+                          <li
+                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                              onClick={() => setTemplatePrompt("Luxury shopping bag design")}
+                          >
+                            • Luxury shopping bag
+                          </li>
+                        </ul>
+                      </div>
+
+                      {generatedTemplates.length > 0 && (
+                          <div className="space-y-2">
+                            <Label>Generated Templates</Label>
+                            <div className="grid grid-cols-2 gap-2">
+                              {generatedTemplates.map((url, index) => (
+                                  <div
+                                      key={index}
+                                      className="border rounded-lg p-1 cursor-pointer hover:border-primary transition-all"
+                                      onClick={() => addGeneratedTemplate(url)}
+                                  >
+                                    <div className="relative w-full aspect-square">
+                                      <Image
+                                          src={url || "/placeholder.svg"}
+                                          alt={`Generated template ${index + 1}`}
+                                          fill
+                                          className="object-contain"
+                                      />
+                                    </div>
+                                    <p className="text-xs text-center mt-1">Use</p>
+                                  </div>
+                              ))}
+                            </div>
+                          </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1848,85 +2399,6 @@ export default function EditorPage() {
                               Perfect for branding and copyright protection!
                             </div>
                           </>
-                      )}
-                    </CardContent>
-                  </Card>
-
-                  {/* AI Logo Generator */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Sparkles className="h-5 w-5" /> AI Logo Generator
-                      </CardTitle>
-                      <CardDescription>Generate logo ideas using AI</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="ai-prompt">Describe your logo</Label>
-                        <Textarea
-                            id="ai-prompt"
-                            placeholder="E.g., A minimalist coffee bean logo with blue and brown colors"
-                            value={aiPrompt}
-                            onChange={(e) => setAiPrompt(e.target.value)}
-                        />
-                      </div>
-
-                      <Button
-                          onClick={generateLogoWithAI}
-                          className="w-full gap-2"
-                          disabled={!aiPrompt.trim() || isGenerating}
-                      >
-                        <Sparkles className="h-4 w-4" />
-                        {isGenerating ? "Generating..." : "Generate Logo Ideas"}
-                      </Button>
-
-                      <div className="text-xs text-gray-500">
-                        Example prompts:
-                        <ul className="mt-1 space-y-1">
-                          <li
-                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                              onClick={() => setAiPrompt("A modern tech company logo with gradient blue colors")}
-                          >
-                            • Modern tech company logo
-                          </li>
-                          <li
-                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                              onClick={() => setAiPrompt("A vintage bakery logo with wheat and rolling pin")}
-                          >
-                            • Vintage bakery logo
-                          </li>
-                          <li
-                              className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
-                              onClick={() => setAiPrompt("A fitness gym logo with a dumbbell silhouette")}
-                          >
-                            • Fitness gym logo
-                          </li>
-                        </ul>
-                      </div>
-
-                      {generatedLogos.length > 0 && (
-                          <div className="space-y-2">
-                            <Label>Generated Logos</Label>
-                            <div className="grid grid-cols-3 gap-2">
-                              {generatedLogos.map((url, index) => (
-                                  <div
-                                      key={index}
-                                      className="border rounded-lg p-1 cursor-pointer hover:border-primary transition-all"
-                                      onClick={() => addGeneratedLogo(url)}
-                                  >
-                                    <div className="relative w-full aspect-square">
-                                      <Image
-                                          src={url || "/placeholder.svg"}
-                                          alt={`Generated logo ${index + 1}`}
-                                          fill
-                                          className="object-contain"
-                                      />
-                                    </div>
-                                    <p className="text-xs text-center mt-1">Add</p>
-                                  </div>
-                              ))}
-                            </div>
-                          </div>
                       )}
                     </CardContent>
                   </Card>
@@ -1999,12 +2471,92 @@ export default function EditorPage() {
                     backgroundSize: showGrid ? "5% 5%" : "auto",
                   }}
               >
-                <Image
-                    src={templateImages[selectedTemplate] || "/placeholder.svg"}
-                    alt={templateNames[selectedTemplate] || "Template"}
-                    fill
-                    className="object-contain"
-                />
+                {/* Template Layer */}
+                {templateLayer.visible && (
+                    <div
+                        className={`absolute cursor-move template-image transition-all ${
+                            selectedLayer === "template" ? "ring-2 ring-blue-500 ring-offset-2 z-20" : "z-5"
+                        } ${templateLayer.locked ? "cursor-not-allowed" : ""}`}
+                        style={{
+                          left: `${templateLayer.position.x}%`,
+                          top: `${templateLayer.position.y}%`,
+                          transform: `translate(-50%, -50%) rotate(${templateLayer.rotation}deg)`,
+                          width: `${templateLayer.size}%`,
+                          height: templateLayer.maintainAspectRatio
+                              ? `${templateLayer.size / templateLayer.aspectRatio}%`
+                              : `${templateLayer.size}%`,
+                          touchAction: "none",
+                          zIndex: templateLayer.zIndex,
+                          opacity: templateLayer.locked ? 0.7 : 1,
+                        }}
+                        onMouseDown={(e) => {
+                          if (templateLayer.locked) return
+
+                          // Prevent event bubbling to canvas
+                          e.stopPropagation()
+
+                          setSelectedLayer("template")
+                          setSelectedLogoIndex(null)
+                          setSelectedLogos([])
+                          setIsDragging(true)
+
+                          const rect = containerRef.current?.getBoundingClientRect()
+                          if (rect) {
+                            const offsetX = e.clientX - rect.left - (rect.width * templateLayer.position.x) / 100
+                            const offsetY = e.clientY - rect.top - (rect.height * templateLayer.position.y) / 100
+                            setDragOffset({ x: offsetX, y: offsetY })
+                          }
+                        }}
+                    >
+                      <Image
+                          src={templateImages[selectedTemplate] || "/placeholder.svg"}
+                          alt={templateNames[selectedTemplate] || "Template"}
+                          fill
+                          className="object-contain"
+                          style={{
+                            pointerEvents: "none",
+                            filter: getTemplateFilterStyle(templateLayer.filters),
+                          }}
+                      />
+
+                      {/* Template Resize Handles */}
+                      {selectedLayer === "template" && !templateLayer.locked && (
+                          <>
+                            {["nw", "ne", "sw", "se", "n", "s", "e", "w"].map((handle) => (
+                                <div
+                                    key={handle}
+                                    className={`absolute w-2 h-2 bg-primary border border-white cursor-${handle}-resize`}
+                                    style={{
+                                      top: handle.includes("n")
+                                          ? "-4px"
+                                          : handle.includes("s")
+                                              ? "calc(100% - 4px)"
+                                              : "calc(50% - 4px)",
+                                      left: handle.includes("w")
+                                          ? "-4px"
+                                          : handle.includes("e")
+                                              ? "calc(100% - 4px)"
+                                              : "calc(50% - 4px)",
+                                    }}
+                                    onMouseDown={(e) => {
+                                      e.stopPropagation()
+                                      if (templateLayer.locked) return
+                                      setIsResizing(true)
+                                      setResizeHandle(handle)
+                                    }}
+                                />
+                            ))}
+                          </>
+                      )}
+
+                      {/* Template Lock indicator */}
+                      {templateLayer.locked && (
+                          <div className="absolute top-0 right-0 bg-red-500 text-white p-1 rounded-bl">
+                            <Lock className="h-3 w-3" />
+                          </div>
+                      )}
+                    </div>
+                )}
 
                 {/* Wax Effect Overlay */}
                 {waxEffect.enabled && logos.length > 0 && logos[0].url && (
@@ -2035,10 +2587,10 @@ export default function EditorPage() {
                                   key={logo.id}
                                   className={`absolute cursor-move logo-image transition-all ${
                                       selectedLogoIndex === originalIndex
-                                          ? "ring-2 ring-primary ring-offset-2 z-10"
+                                          ? "ring-2 ring-primary ring-offset-2 z-30"
                                           : selectedLogos.includes(originalIndex)
-                                              ? "ring-2 ring-blue-400 ring-offset-2 z-10"
-                                              : "z-5"
+                                              ? "ring-2 ring-blue-400 ring-offset-2 z-25"
+                                              : "z-10"
                                   } ${logo.locked ? "cursor-not-allowed" : ""}`}
                                   style={{
                                     left: `${logo.position.x}%`,
@@ -2135,577 +2687,880 @@ export default function EditorPage() {
               )}
             </div>
 
-            {/* Right Panel - Editor Controls */}
+            {/* Right Panel - Editor Controls & Logo AI */}
             {showRightPanel && (
-                <div className="space-y-6 transition-all duration-300">
-                  <Tabs value={activeTab} onValueChange={setActiveTab}>
-                    <TabsList className="grid grid-cols-4 w-full">
-                      <TabsTrigger value="logo">Logos</TabsTrigger>
-                      <TabsTrigger value="layers">Layers</TabsTrigger>
-                      <TabsTrigger value="colors">Colors</TabsTrigger>
-                      <TabsTrigger value="export">Export</TabsTrigger>
-                    </TabsList>
-
-                    <TabsContent value="logo" className="space-y-6 pt-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            <ImageIcon className="h-5 w-5" /> Manage Logos
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="flex flex-wrap gap-2">
-                            {logos.map((logo, index) => (
-                                <div
-                                    key={logo.id}
-                                    className={`border rounded-lg p-1 cursor-pointer transition-all ${
-                                        selectedLogoIndex === index
-                                            ? "border-primary bg-primary/5"
-                                            : selectedLogos.includes(index)
-                                                ? "border-blue-400 bg-blue-50"
-                                                : "hover:border-gray-300"
-                                    } ${!logo.visible ? "opacity-50" : ""}`}
-                                    onClick={() => setSelectedLogoIndex(index)}
-                                >
-                                  <div className="relative w-12 h-12">
-                                    {logo.url && (
-                                        <Image
-                                            src={logo.url || "/placeholder.svg"}
-                                            alt={`Logo ${index + 1}`}
-                                            fill
-                                            className="object-contain"
-                                            style={{ filter: getLogoFilterStyle(logo.filters) }}
-                                        />
-                                    )}
-                                    {logo.locked && <Lock className="absolute top-0 right-0 h-3 w-3 text-red-500" />}
-                                  </div>
-                                </div>
-                            ))}
+                <div className="h-full max-h-[calc(100vh-200px)] overflow-y-auto transition-all duration-300">
+                  <div className="space-y-2 pr-2">
+                    <Accordion type="multiple" defaultValue={["logos", "layers"]} className="w-full">
+                      {/* Logo Management Accordion */}
+                      <AccordionItem value="logos">
+                        <AccordionTrigger className="text-base font-semibold">
+                          <div className="flex items-center gap-2">
+                            <ImageIcon className="h-5 w-5" />
+                            Logo Management
                           </div>
-
-                          <div className="flex flex-col gap-2">
-                            <input
-                                type="file"
-                                id="logo-upload-side"
-                                accept="image/*"
-                                onChange={handleImageUpload}
-                                className="hidden"
-                                disabled={isUploading}
-                            />
-                            <label htmlFor="logo-upload-side">
-                              <Button variant="outline" className="w-full gap-2" asChild disabled={isUploading}>
-                            <span>
-                              {isUploading ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
-                                  </>
-                              ) : (
-                                  <>
-                                    <Upload className="h-4 w-4" /> Upload New Logo
-                                  </>
-                              )}
-                            </span>
-                              </Button>
-                            </label>
-
-                            {selectedLogo && (
-                                <>
-                                  <Button variant="outline" onClick={resetLogo} className="gap-2">
-                                    <RotateCcw className="h-4 w-4" /> Reset Position
-                                  </Button>
-                                  <Button
-                                      variant="outline"
-                                      onClick={removeLogo}
-                                      className="gap-2 text-destructive hover:text-destructive"
-                                  >
-                                    <Trash2 className="h-4 w-4" /> Remove Logo
-                                  </Button>
-                                </>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {selectedLogo && (
+                        </AccordionTrigger>
+                        <AccordionContent className="space-y-4">
                           <Card>
-                            <CardHeader>
-                              <CardTitle>Logo Settings</CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
-                                {selectedLogo.url && (
-                                    <Image
-                                        src={selectedLogo.url || "/placeholder.svg"}
-                                        alt="Selected logo"
-                                        fill
-                                        className="object-contain"
-                                        style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
-                                    />
+                            <CardContent className="p-4 space-y-4">
+                              <div className="flex flex-wrap gap-2">
+                                {logos.map((logo, index) => (
+                                    <div
+                                        key={logo.id}
+                                        className={`border rounded-lg p-1 cursor-pointer transition-all ${
+                                            selectedLogoIndex === index
+                                                ? "border-primary bg-primary/5"
+                                                : selectedLogos.includes(index)
+                                                    ? "border-blue-400 bg-blue-50"
+                                                    : "hover:border-gray-300"
+                                        } ${!logo.visible ? "opacity-50" : ""}`}
+                                        onClick={() => setSelectedLogoIndex(index)}
+                                    >
+                                      <div className="relative w-12 h-12">
+                                        {logo.url && (
+                                            <Image
+                                                src={logo.url || "/placeholder.svg"}
+                                                alt={`Logo ${index + 1}`}
+                                                fill
+                                                className="object-contain"
+                                                style={{ filter: getLogoFilterStyle(logo.filters) }}
+                                            />
+                                        )}
+                                        {logo.locked && <Lock className="absolute top-0 right-0 h-3 w-3 text-red-500" />}
+                                      </div>
+                                    </div>
+                                ))}
+                              </div>
+
+                              <div className="flex flex-col gap-2">
+                                <input
+                                    type="file"
+                                    id="logo-upload-side"
+                                    accept="image/*"
+                                    onChange={handleImageUpload}
+                                    className="hidden"
+                                    disabled={isUploading}
+                                />
+                                <label htmlFor="logo-upload-side">
+                                  <Button variant="outline" className="w-full gap-2" asChild disabled={isUploading}>
+                                <span>
+                                  {isUploading ? (
+                                      <>
+                                        <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                                      </>
+                                  ) : (
+                                      <>
+                                        <Upload className="h-4 w-4" /> Upload New Logo
+                                      </>
+                                  )}
+                                </span>
+                                  </Button>
+                                </label>
+
+                                {selectedLogo && (
+                                    <>
+                                      <Button variant="outline" onClick={resetLogo} className="gap-2">
+                                        <RotateCcw className="h-4 w-4" /> Reset Position
+                                      </Button>
+                                      <Button
+                                          variant="outline"
+                                          onClick={removeLogo}
+                                          className="gap-2 text-destructive hover:text-destructive"
+                                      >
+                                        <Trash2 className="h-4 w-4" /> Remove Logo
+                                      </Button>
+                                    </>
                                 )}
-                              </div>
-
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm">Size</span>
-                                  <div className="flex items-center gap-2">
-                                    <ZoomIn className="h-4 w-4 text-gray-500" />
-                                    <span className="text-sm">{selectedLogo.size}%</span>
-                                  </div>
-                                </div>
-                                <Slider
-                                    value={[selectedLogo.size]}
-                                    min={5}
-                                    max={100}
-                                    step={1}
-                                    onValueChange={(value) => updateLogoSize(value[0])}
-                                />
-                              </div>
-
-                              <div className="space-y-2">
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm">Rotation</span>
-                                  <span className="text-sm">{selectedLogo.rotation}°</span>
-                                </div>
-                                <Slider
-                                    value={[selectedLogo.rotation]}
-                                    min={0}
-                                    max={360}
-                                    step={1}
-                                    onValueChange={(value) => updateLogoRotation(value[0])}
-                                />
-                              </div>
-
-                              <div className="flex items-center space-x-2">
-                                <Switch
-                                    id="maintain-aspect"
-                                    checked={selectedLogo.maintainAspectRatio}
-                                    onCheckedChange={toggleMaintainAspectRatio}
-                                />
-                                <Label htmlFor="maintain-aspect">Maintain aspect ratio</Label>
-                              </div>
-
-                              <div className="flex items-center gap-2 text-sm text-gray-600">
-                                <Move className="h-4 w-4" />
-                                <span>Drag logo on canvas to position</span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-2">
-                                <div className="space-y-1">
-                                  <Label htmlFor="position-x">X Position</Label>
-                                  <Input
-                                      id="position-x"
-                                      type="number"
-                                      value={Math.round(selectedLogo.position.x)}
-                                      onChange={(e) => updateLogoPosition(Number(e.target.value), selectedLogo.position.y)}
-                                      min={0}
-                                      max={100}
-                                  />
-                                </div>
-                                <div className="space-y-1">
-                                  <Label htmlFor="position-y">Y Position</Label>
-                                  <Input
-                                      id="position-y"
-                                      type="number"
-                                      value={Math.round(selectedLogo.position.y)}
-                                      onChange={(e) => updateLogoPosition(selectedLogo.position.x, Number(e.target.value))}
-                                      min={0}
-                                      max={100}
-                                  />
-                                </div>
                               </div>
                             </CardContent>
                           </Card>
-                      )}
-                    </TabsContent>
 
-                    <TabsContent value="layers" className="space-y-6 pt-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle className="flex items-center gap-2">
-                            <Layers className="h-5 w-5" /> Layer Management
-                          </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          {logos
-                              .map((logo, index) => ({ logo, index }))
-                              .sort((a, b) => b.logo.zIndex - a.logo.zIndex)
-                              .map(({ logo, index }) => (
-                                  <div
-                                      key={logo.id}
-                                      className={`flex items-center gap-2 p-2 border rounded-lg ${
-                                          selectedLogoIndex === index ? "border-primary bg-primary/5" : ""
-                                      }`}
-                                      onClick={() => setSelectedLogoIndex(index)}
-                                  >
-                                    <div className="relative w-8 h-8 flex-shrink-0">
-                                      {logo.url && (
-                                          <Image
-                                              src={logo.url || "/placeholder.svg"}
-                                              alt={`Layer ${index + 1}`}
-                                              fill
-                                              className="object-contain rounded"
-                                          />
-                                      )}
+                          {selectedLogo && (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle>Logo Settings</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                    {selectedLogo.url && (
+                                        <Image
+                                            src={selectedLogo.url || "/placeholder.svg"}
+                                            alt="Selected logo"
+                                            fill
+                                            className="object-contain"
+                                            style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
+                                        />
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm">Size</span>
+                                      <div className="flex items-center gap-2">
+                                        <ZoomIn className="h-4 w-4 text-gray-500" />
+                                        <span className="text-sm">{selectedLogo.size}%</span>
+                                      </div>
                                     </div>
+                                    <Slider
+                                        value={[selectedLogo.size]}
+                                        min={5}
+                                        max={100}
+                                        step={1}
+                                        onValueChange={(value) => updateLogoSize(value[0])}
+                                    />
+                                  </div>
 
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium truncate">Logo {index + 1}</p>
-                                      <p className="text-xs text-gray-500">Z-Index: {logo.zIndex}</p>
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm">Rotation</span>
+                                      <span className="text-sm">{selectedLogo.rotation}°</span>
                                     </div>
+                                    <Slider
+                                        value={[selectedLogo.rotation]}
+                                        min={0}
+                                        max={360}
+                                        step={1}
+                                        onValueChange={(value) => updateLogoRotation(value[0])}
+                                    />
+                                  </div>
 
-                                    <div className="flex items-center gap-1">
-                                      <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            toggleLayerVisibility(index)
-                                          }}
-                                      >
-                                        {logo.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                                      </Button>
+                                  <div className="flex items-center space-x-2">
+                                    <Switch
+                                        id="maintain-aspect"
+                                        checked={selectedLogo.maintainAspectRatio}
+                                        onCheckedChange={toggleMaintainAspectRatio}
+                                    />
+                                    <Label htmlFor="maintain-aspect">Maintain aspect ratio</Label>
+                                  </div>
 
-                                      <Button
-                                          variant="ghost"
-                                          size="sm"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            toggleLayerLock(index)
-                                          }}
-                                      >
-                                        {logo.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
-                                      </Button>
+                                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                                    <Move className="h-4 w-4" />
+                                    <span>Drag logo on canvas to position</span>
+                                  </div>
 
-                                      <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                          <Button variant="ghost" size="sm">
-                                            <MoreHorizontal className="h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent>
-                                          <DropdownMenuItem onClick={() => moveLayerUp(index)}>
-                                            <ChevronUp className="h-4 w-4 mr-2" />
-                                            Bring Forward
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => moveLayerDown(index)}>
-                                            <ChevronDown className="h-4 w-4 mr-2" />
-                                            Send Backward
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => bringToFront(index)}>
-                                            Bring to Front
-                                          </DropdownMenuItem>
-                                          <DropdownMenuItem onClick={() => sendToBack(index)}>Send to Back</DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                      </DropdownMenu>
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                      <Label htmlFor="position-x">X Position</Label>
+                                      <Input
+                                          id="position-x"
+                                          type="number"
+                                          value={Math.round(selectedLogo.position.x)}
+                                          onChange={(e) => updateLogoPosition(Number(e.target.value), selectedLogo.position.y)}
+                                          min={0}
+                                          max={100}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label htmlFor="position-y">Y Position</Label>
+                                      <Input
+                                          id="position-y"
+                                          type="number"
+                                          value={Math.round(selectedLogo.position.y)}
+                                          onChange={(e) => updateLogoPosition(selectedLogo.position.x, Number(e.target.value))}
+                                          min={0}
+                                          max={100}
+                                      />
                                     </div>
                                   </div>
-                              ))}
-
-                          {logos.length === 0 && (
-                              <div className="text-center py-8 text-gray-500">
-                                <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
-                                <p>No layers yet. Add some logos to get started!</p>
-                              </div>
+                                </CardContent>
+                              </Card>
                           )}
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
+                        </AccordionContent>
+                      </AccordionItem>
 
-                    <TabsContent value="colors" className="space-y-6 pt-4">
-                      {selectedLogo ? (
+                      {/* Layer Management Accordion */}
+                      <AccordionItem value="layers">
+                        <AccordionTrigger className="text-base font-semibold">
+                          <div className="flex items-center gap-2">
+                            <Layers className="h-5 w-5" />
+                            Layer Management
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                          <Card>
+                            <CardContent className="p-4 space-y-2">
+                              {/* Template Layer */}
+                              <div
+                                  className={`flex items-center gap-2 p-2 border rounded-lg ${
+                                      selectedLayer === "template" ? "border-primary bg-primary/5" : ""
+                                  }`}
+                                  onClick={() => setSelectedLayer("template")}
+                              >
+                                <div className="relative w-8 h-8 flex-shrink-0">
+                                  <Image
+                                      src={templateImages[selectedTemplate] || "/placeholder.svg"}
+                                      alt="Template"
+                                      fill
+                                      className="object-contain rounded"
+                                  />
+                                </div>
+
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium truncate">{templateLayer.name}</p>
+                                  <p className="text-xs text-gray-500">Z-Index: {templateLayer.zIndex}</p>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleTemplateVisibility()
+                                      }}
+                                  >
+                                    {templateLayer.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                  </Button>
+
+                                  <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        toggleTemplateLock()
+                                      }}
+                                  >
+                                    {templateLayer.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {/* Logo Layers */}
+                              {logos
+                                  .map((logo, index) => ({ logo, index }))
+                                  .sort((a, b) => b.logo.zIndex - a.logo.zIndex)
+                                  .map(({ logo, index }) => (
+                                      <div
+                                          key={logo.id}
+                                          className={`flex items-center gap-2 p-2 border rounded-lg ${
+                                              selectedLogoIndex === index ? "border-primary bg-primary/5" : ""
+                                          }`}
+                                          onClick={() => {
+                                            setSelectedLogoIndex(index)
+                                            setSelectedLayer(index)
+                                          }}
+                                      >
+                                        <div className="relative w-8 h-8 flex-shrink-0">
+                                          {logo.url && (
+                                              <Image
+                                                  src={logo.url || "/placeholder.svg"}
+                                                  alt={`Layer ${index + 1}`}
+                                                  fill
+                                                  className="object-contain rounded"
+                                              />
+                                          )}
+                                        </div>
+
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-sm font-medium truncate">Logo {index + 1}</p>
+                                          <p className="text-xs text-gray-500">Z-Index: {logo.zIndex}</p>
+                                        </div>
+
+                                        <div className="flex items-center gap-1">
+                                          <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                toggleLayerVisibility(index)
+                                              }}
+                                          >
+                                            {logo.visible ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                          </Button>
+
+                                          <Button
+                                              variant="ghost"
+                                              size="sm"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                toggleLayerLock(index)
+                                              }}
+                                          >
+                                            {logo.locked ? <Lock className="h-4 w-4" /> : <Unlock className="h-4 w-4" />}
+                                          </Button>
+
+                                          <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                              <Button variant="ghost" size="sm">
+                                                <MoreHorizontal className="h-4 w-4" />
+                                              </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent>
+                                              <DropdownMenuItem onClick={() => moveLayerUp(index)}>
+                                                <ChevronUp className="h-4 w-4 mr-2" />
+                                                Bring Forward
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem onClick={() => moveLayerDown(index)}>
+                                                <ChevronDown className="h-4 w-4 mr-2" />
+                                                Send Backward
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem onClick={() => bringToFront(index)}>
+                                                Bring to Front
+                                              </DropdownMenuItem>
+                                              <DropdownMenuItem onClick={() => sendToBack(index)}>
+                                                Send to Back
+                                              </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                          </DropdownMenu>
+                                        </div>
+                                      </div>
+                                  ))}
+
+                              {logos.length === 0 && (
+                                  <div className="text-center py-8 text-gray-500">
+                                    <Layers className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                                    <p>No logo layers yet. Add some logos to get started!</p>
+                                  </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      {/* Color Adjustments Accordion */}
+                      <AccordionItem value="colors">
+                        <AccordionTrigger className="text-base font-semibold">
+                          <div className="flex items-center gap-2">
+                            <Palette className="h-5 w-5" />
+                            Color Adjustments
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="space-y-4">
+                          {selectedLayer === "template" ? (
+                              <>
+                                <Card>
+                                  <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                      <Package className="h-5 w-5" /> Template Settings
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent className="space-y-4">
+                                    <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                      <Image
+                                          src={templateImages[selectedTemplate] || "/placeholder.svg"}
+                                          alt="Selected template"
+                                          fill
+                                          className="object-contain"
+                                          style={{ filter: getTemplateFilterStyle(templateLayer.filters) }}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm">Size</span>
+                                        <div className="flex items-center gap-2">
+                                          <ZoomIn className="h-4 w-4 text-gray-500" />
+                                          <span className="text-sm">{templateLayer.size}%</span>
+                                        </div>
+                                      </div>
+                                      <Slider
+                                          value={[templateLayer.size]}
+                                          min={10}
+                                          max={150}
+                                          step={1}
+                                          onValueChange={(value) => updateTemplateSize(value[0])}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm">Rotation</span>
+                                        <span className="text-sm">{templateLayer.rotation}°</span>
+                                      </div>
+                                      <Slider
+                                          value={[templateLayer.rotation]}
+                                          min={0}
+                                          max={360}
+                                          step={1}
+                                          onValueChange={(value) => updateTemplateRotation(value[0])}
+                                      />
+                                    </div>
+
+                                    <div className="flex items-center space-x-2">
+                                      <Switch
+                                          id="template-maintain-aspect"
+                                          checked={templateLayer.maintainAspectRatio}
+                                          onCheckedChange={toggleTemplateMaintainAspectRatio}
+                                      />
+                                      <Label htmlFor="template-maintain-aspect">Maintain aspect ratio</Label>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-2">
+                                      <div className="space-y-1">
+                                        <Label htmlFor="template-position-x">X Position</Label>
+                                        <Input
+                                            id="template-position-x"
+                                            type="number"
+                                            value={Math.round(templateLayer.position.x)}
+                                            onChange={(e) =>
+                                                updateTemplatePosition(Number(e.target.value), templateLayer.position.y)
+                                            }
+                                            min={0}
+                                            max={100}
+                                        />
+                                      </div>
+                                      <div className="space-y-1">
+                                        <Label htmlFor="template-position-y">Y Position</Label>
+                                        <Input
+                                            id="template-position-y"
+                                            type="number"
+                                            value={Math.round(templateLayer.position.y)}
+                                            onChange={(e) =>
+                                                updateTemplatePosition(templateLayer.position.x, Number(e.target.value))
+                                            }
+                                            min={0}
+                                            max={100}
+                                        />
+                                      </div>
+                                    </div>
+
+                                    <Button variant="outline" onClick={resetTemplate} className="w-full gap-2">
+                                      <RotateCcw className="h-4 w-4" /> Reset Template
+                                    </Button>
+                                  </CardContent>
+                                </Card>
+
+                                <Card>
+                                  <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                      <Palette className="h-5 w-5" /> Template Color Adjustments
+                                    </CardTitle>
+                                  </CardHeader>
+                                  <CardContent className="space-y-4">
+                                    <div className="space-y-4">
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                    <span className="text-sm flex items-center gap-1">
+                                      <SunMedium className="h-4 w-4" /> Brightness
+                                    </span>
+                                          <span className="text-sm">{templateLayer.filters.brightness}%</span>
+                                        </div>
+                                        <Slider
+                                            value={[templateLayer.filters.brightness]}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            onValueChange={(value) => updateTemplateFilter("brightness", value[0])}
+                                        />
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                    <span className="text-sm flex items-center gap-1">
+                                      <Contrast className="h-4 w-4" /> Contrast
+                                    </span>
+                                          <span className="text-sm">{templateLayer.filters.contrast}%</span>
+                                        </div>
+                                        <Slider
+                                            value={[templateLayer.filters.contrast]}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            onValueChange={(value) => updateTemplateFilter("contrast", value[0])}
+                                        />
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-sm">Hue Rotation</span>
+                                          <span className="text-sm">{templateLayer.filters.hue}°</span>
+                                        </div>
+                                        <Slider
+                                            value={[templateLayer.filters.hue]}
+                                            min={0}
+                                            max={360}
+                                            step={1}
+                                            onValueChange={(value) => updateTemplateFilter("hue", value[0])}
+                                        />
+                                      </div>
+
+                                      <div className="space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-sm">Saturation</span>
+                                          <span className="text-sm">{templateLayer.filters.saturation}%</span>
+                                        </div>
+                                        <Slider
+                                            value={[templateLayer.filters.saturation]}
+                                            min={0}
+                                            max={200}
+                                            step={1}
+                                            onValueChange={(value) => updateTemplateFilter("saturation", value[0])}
+                                        />
+                                      </div>
+
+                                      <Button
+                                          variant="outline"
+                                          onClick={() => {
+                                            setTemplateLayer((prev) => ({
+                                              ...prev,
+                                              filters: {
+                                                brightness: 100,
+                                                contrast: 100,
+                                                hue: 0,
+                                                saturation: 100,
+                                              },
+                                            }))
+                                          }}
+                                          className="w-full"
+                                      >
+                                        Reset Template Adjustments
+                                      </Button>
+                                    </div>
+                                  </CardContent>
+                                </Card>
+                              </>
+                          ) : selectedLogo ? (
+                              <Card>
+                                <CardHeader>
+                                  <CardTitle className="flex items-center gap-2">
+                                    <Palette className="h-5 w-5" /> Logo Color Adjustments
+                                  </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                  <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                    {selectedLogo.url && (
+                                        <Image
+                                            src={selectedLogo.url || "/placeholder.svg"}
+                                            alt="Selected logo"
+                                            fill
+                                            className="object-contain"
+                                            style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
+                                        />
+                                    )}
+                                  </div>
+
+                                  <div className="space-y-4">
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                  <span className="text-sm flex items-center gap-1">
+                                    <SunMedium className="h-4 w-4" /> Brightness
+                                  </span>
+                                        <span className="text-sm">{selectedLogo.filters.brightness}%</span>
+                                      </div>
+                                      <Slider
+                                          value={[selectedLogo.filters.brightness]}
+                                          min={0}
+                                          max={200}
+                                          step={1}
+                                          onValueChange={(value) => updateLogoFilter("brightness", value[0])}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                  <span className="text-sm flex items-center gap-1">
+                                    <Contrast className="h-4 w-4" /> Contrast
+                                  </span>
+                                        <span className="text-sm">{selectedLogo.filters.contrast}%</span>
+                                      </div>
+                                      <Slider
+                                          value={[selectedLogo.filters.contrast]}
+                                          min={0}
+                                          max={200}
+                                          step={1}
+                                          onValueChange={(value) => updateLogoFilter("contrast", value[0])}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm">Hue Rotation</span>
+                                        <span className="text-sm">{selectedLogo.filters.hue}°</span>
+                                      </div>
+                                      <Slider
+                                          value={[selectedLogo.filters.hue]}
+                                          min={0}
+                                          max={360}
+                                          step={1}
+                                          onValueChange={(value) => updateLogoFilter("hue", value[0])}
+                                      />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-sm">Saturation</span>
+                                        <span className="text-sm">{selectedLogo.filters.saturation}%</span>
+                                      </div>
+                                      <Slider
+                                          value={[selectedLogo.filters.saturation]}
+                                          min={0}
+                                          max={200}
+                                          step={1}
+                                          onValueChange={(value) => updateLogoFilter("saturation", value[0])}
+                                      />
+                                    </div>
+
+                                    <Button
+                                        variant="outline"
+                                        onClick={() => {
+                                          if (selectedLogoIndex === null) return
+                                          const newLogos = [...logos]
+                                          newLogos[selectedLogoIndex] = {
+                                            ...newLogos[selectedLogoIndex],
+                                            filters: {
+                                              brightness: 100,
+                                              contrast: 100,
+                                              hue: 0,
+                                              saturation: 100,
+                                            },
+                                          }
+                                          setLogos(newLogos)
+                                        }}
+                                        className="w-full"
+                                    >
+                                      Reset Color Adjustments
+                                    </Button>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                          ) : (
+                              <Card>
+                                <CardContent className="p-6 text-center">
+                                  <Palette className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                                  <p className="text-gray-500">Select a layer to adjust its colors</p>
+                                </CardContent>
+                              </Card>
+                          )}
+
                           <Card>
                             <CardHeader>
-                              <CardTitle className="flex items-center gap-2">
-                                <Palette className="h-5 w-5" /> Logo Color Adjustments
-                              </CardTitle>
+                              <CardTitle>Color Presets</CardTitle>
                             </CardHeader>
-                            <CardContent className="space-y-4">
-                              <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
-                                {selectedLogo.url && (
-                                    <Image
-                                        src={selectedLogo.url || "/placeholder.svg"}
-                                        alt="Selected logo"
-                                        fill
-                                        className="object-contain"
-                                        style={{ filter: getLogoFilterStyle(selectedLogo.filters) }}
-                                    />
-                                )}
-                              </div>
-
-                              <div className="space-y-4">
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                              <span className="text-sm flex items-center gap-1">
-                                <SunMedium className="h-4 w-4" /> Brightness
-                              </span>
-                                    <span className="text-sm">{selectedLogo.filters.brightness}%</span>
+                            <CardContent>
+                              <div className="grid grid-cols-2 gap-2">
+                                <Button
+                                    variant="outline"
+                                    className="h-auto py-3"
+                                    onClick={() => {
+                                      if (selectedLayer === "template") {
+                                        setTemplateLayer((prev) => ({
+                                          ...prev,
+                                          filters: {
+                                            brightness: 100,
+                                            contrast: 120,
+                                            hue: 0,
+                                            saturation: 110,
+                                          },
+                                        }))
+                                      } else if (selectedLogoIndex !== null) {
+                                        const newLogos = [...logos]
+                                        newLogos[selectedLogoIndex] = {
+                                          ...newLogos[selectedLogoIndex],
+                                          filters: {
+                                            brightness: 100,
+                                            contrast: 120,
+                                            hue: 0,
+                                            saturation: 110,
+                                          },
+                                        }
+                                        setLogos(newLogos)
+                                      }
+                                    }}
+                                    disabled={!selectedLogo && selectedLayer !== "template"}
+                                >
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-medium">Vibrant</span>
+                                    <span className="text-xs text-gray-500">High contrast</span>
                                   </div>
-                                  <Slider
-                                      value={[selectedLogo.filters.brightness]}
-                                      min={0}
-                                      max={200}
-                                      step={1}
-                                      onValueChange={(value) => updateLogoFilter("brightness", value[0])}
-                                  />
-                                </div>
-
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                              <span className="text-sm flex items-center gap-1">
-                                <Contrast className="h-4 w-4" /> Contrast
-                              </span>
-                                    <span className="text-sm">{selectedLogo.filters.contrast}%</span>
-                                  </div>
-                                  <Slider
-                                      value={[selectedLogo.filters.contrast]}
-                                      min={0}
-                                      max={200}
-                                      step={1}
-                                      onValueChange={(value) => updateLogoFilter("contrast", value[0])}
-                                  />
-                                </div>
-
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Hue Rotation</span>
-                                    <span className="text-sm">{selectedLogo.filters.hue}°</span>
-                                  </div>
-                                  <Slider
-                                      value={[selectedLogo.filters.hue]}
-                                      min={0}
-                                      max={360}
-                                      step={1}
-                                      onValueChange={(value) => updateLogoFilter("hue", value[0])}
-                                  />
-                                </div>
-
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm">Saturation</span>
-                                    <span className="text-sm">{selectedLogo.filters.saturation}%</span>
-                                  </div>
-                                  <Slider
-                                      value={[selectedLogo.filters.saturation]}
-                                      min={0}
-                                      max={200}
-                                      step={1}
-                                      onValueChange={(value) => updateLogoFilter("saturation", value[0])}
-                                  />
-                                </div>
+                                </Button>
 
                                 <Button
                                     variant="outline"
+                                    className="h-auto py-3"
                                     onClick={() => {
-                                      if (selectedLogoIndex === null) return
-                                      const newLogos = [...logos]
-                                      newLogos[selectedLogoIndex] = {
-                                        ...newLogos[selectedLogoIndex],
-                                        filters: {
-                                          brightness: 100,
-                                          contrast: 100,
-                                          hue: 0,
-                                          saturation: 100,
-                                        },
+                                      if (selectedLayer === "template") {
+                                        setTemplateLayer((prev) => ({
+                                          ...prev,
+                                          filters: {
+                                            brightness: 110,
+                                            contrast: 90,
+                                            hue: 0,
+                                            saturation: 80,
+                                          },
+                                        }))
+                                      } else if (selectedLogoIndex !== null) {
+                                        const newLogos = [...logos]
+                                        newLogos[selectedLogoIndex] = {
+                                          ...newLogos[selectedLogoIndex],
+                                          filters: {
+                                            brightness: 110,
+                                            contrast: 90,
+                                            hue: 0,
+                                            saturation: 80,
+                                          },
+                                        }
+                                        setLogos(newLogos)
                                       }
-                                      setLogos(newLogos)
                                     }}
-                                    className="w-full"
+                                    disabled={!selectedLogo && selectedLayer !== "template"}
                                 >
-                                  Reset Color Adjustments
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-medium">Soft</span>
+                                    <span className="text-xs text-gray-500">Muted colors</span>
+                                  </div>
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    className="h-auto py-3"
+                                    onClick={() => {
+                                      if (selectedLayer === "template") {
+                                        setTemplateLayer((prev) => ({
+                                          ...prev,
+                                          filters: {
+                                            brightness: 100,
+                                            contrast: 100,
+                                            hue: 180,
+                                            saturation: 100,
+                                          },
+                                        }))
+                                      } else if (selectedLogoIndex !== null) {
+                                        const newLogos = [...logos]
+                                        newLogos[selectedLogoIndex] = {
+                                          ...newLogos[selectedLogoIndex],
+                                          filters: {
+                                            brightness: 100,
+                                            contrast: 100,
+                                            hue: 180,
+                                            saturation: 100,
+                                          },
+                                        }
+                                        setLogos(newLogos)
+                                      }
+                                    }}
+                                    disabled={!selectedLogo && selectedLayer !== "template"}
+                                >
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-medium">Invert Hue</span>
+                                    <span className="text-xs text-gray-500">Opposite colors</span>
+                                  </div>
+                                </Button>
+
+                                <Button
+                                    variant="outline"
+                                    className="h-auto py-3"
+                                    onClick={() => {
+                                      if (selectedLayer === "template") {
+                                        setTemplateLayer((prev) => ({
+                                          ...prev,
+                                          filters: {
+                                            brightness: 120,
+                                            contrast: 110,
+                                            hue: 0,
+                                            saturation: 0,
+                                          },
+                                        }))
+                                      } else if (selectedLogoIndex !== null) {
+                                        const newLogos = [...logos]
+                                        newLogos[selectedLogoIndex] = {
+                                          ...newLogos[selectedLogoIndex],
+                                          filters: {
+                                            brightness: 120,
+                                            contrast: 110,
+                                            hue: 0,
+                                            saturation: 0,
+                                          },
+                                        }
+                                        setLogos(newLogos)
+                                      }
+                                    }}
+                                    disabled={!selectedLogo && selectedLayer !== "template"}
+                                >
+                                  <div className="flex flex-col items-center">
+                                    <span className="font-medium">Grayscale</span>
+                                    <span className="text-xs text-gray-500">Black & white</span>
+                                  </div>
                                 </Button>
                               </div>
                             </CardContent>
                           </Card>
-                      ) : (
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      {/* AI Logo Generator Accordion */}
+                      <AccordionItem value="ai-logos">
+                        <AccordionTrigger className="text-base font-semibold">
+                          <div className="flex items-center gap-2">
+                            <Sparkles className="h-5 w-5" />
+                            AI Logo Generator
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
                           <Card>
-                            <CardContent className="p-6 text-center">
-                              <Palette className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                              <p className="text-gray-500">Select a logo to adjust its colors</p>
+                            <CardContent className="p-4 space-y-4">
+                              <div className="space-y-2">
+                                <Label htmlFor="ai-prompt">Describe your logo</Label>
+                                <Textarea
+                                    id="ai-prompt"
+                                    placeholder="E.g., A minimalist coffee bean logo with blue and brown colors"
+                                    value={aiPrompt}
+                                    onChange={(e) => setAiPrompt(e.target.value)}
+                                />
+                              </div>
+
+                              <Button
+                                  onClick={generateLogoWithAI}
+                                  className="w-full gap-2"
+                                  disabled={!aiPrompt.trim() || isGenerating}
+                              >
+                                <Sparkles className="h-4 w-4" />
+                                {isGenerating ? "Generating..." : "Generate Logo Ideas"}
+                              </Button>
+
+                              <div className="text-xs text-gray-500">
+                                Example prompts:
+                                <ul className="mt-1 space-y-1">
+                                  <li
+                                      className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                                      onClick={() => setAiPrompt("A modern tech company logo with gradient blue colors")}
+                                  >
+                                    • Modern tech company logo
+                                  </li>
+                                  <li
+                                      className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                                      onClick={() => setAiPrompt("A vintage bakery logo with wheat and rolling pin")}
+                                  >
+                                    • Vintage bakery logo
+                                  </li>
+                                  <li
+                                      className="cursor-pointer hover:text-primary p-1 rounded hover:bg-gray-100"
+                                      onClick={() => setAiPrompt("A fitness gym logo with a dumbbell silhouette")}
+                                  >
+                                    • Fitness gym logo
+                                  </li>
+                                </ul>
+                              </div>
+
+                              {generatedLogos.length > 0 && (
+                                  <div className="space-y-2">
+                                    <Label>Generated Logos</Label>
+                                    <div className="grid grid-cols-2 gap-2">
+                                      {generatedLogos.map((url, index) => (
+                                          <div
+                                              key={index}
+                                              className="border rounded-lg p-1 cursor-pointer hover:border-primary transition-all"
+                                              onClick={() => addGeneratedLogo(url)}
+                                          >
+                                            <div className="relative w-full aspect-square">
+                                              <Image
+                                                  src={url || "/placeholder.svg"}
+                                                  alt={`Generated logo ${index + 1}`}
+                                                  fill
+                                                  className="object-contain"
+                                              />
+                                            </div>
+                                            <p className="text-xs text-center mt-1">Add</p>
+                                          </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                              )}
                             </CardContent>
                           </Card>
-                      )}
-
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Color Presets</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button
-                                variant="outline"
-                                className="h-auto py-3"
-                                onClick={() => {
-                                  if (selectedLogoIndex === null) return
-                                  const newLogos = [...logos]
-                                  newLogos[selectedLogoIndex] = {
-                                    ...newLogos[selectedLogoIndex],
-                                    filters: {
-                                      brightness: 100,
-                                      contrast: 120,
-                                      hue: 0,
-                                      saturation: 110,
-                                    },
-                                  }
-                                  setLogos(newLogos)
-                                }}
-                                disabled={!selectedLogo}
-                            >
-                              <div className="flex flex-col items-center">
-                                <span className="font-medium">Vibrant</span>
-                                <span className="text-xs text-gray-500">High contrast</span>
-                              </div>
-                            </Button>
-
-                            <Button
-                                variant="outline"
-                                className="h-auto py-3"
-                                onClick={() => {
-                                  if (selectedLogoIndex === null) return
-                                  const newLogos = [...logos]
-                                  newLogos[selectedLogoIndex] = {
-                                    ...newLogos[selectedLogoIndex],
-                                    filters: {
-                                      brightness: 110,
-                                      contrast: 90,
-                                      hue: 0,
-                                      saturation: 80,
-                                    },
-                                  }
-                                  setLogos(newLogos)
-                                }}
-                                disabled={!selectedLogo}
-                            >
-                              <div className="flex flex-col items-center">
-                                <span className="font-medium">Soft</span>
-                                <span className="text-xs text-gray-500">Muted colors</span>
-                              </div>
-                            </Button>
-
-                            <Button
-                                variant="outline"
-                                className="h-auto py-3"
-                                onClick={() => {
-                                  if (selectedLogoIndex === null) return
-                                  const newLogos = [...logos]
-                                  newLogos[selectedLogoIndex] = {
-                                    ...newLogos[selectedLogoIndex],
-                                    filters: {
-                                      brightness: 100,
-                                      contrast: 100,
-                                      hue: 180,
-                                      saturation: 100,
-                                    },
-                                  }
-                                  setLogos(newLogos)
-                                }}
-                                disabled={!selectedLogo}
-                            >
-                              <div className="flex flex-col items-center">
-                                <span className="font-medium">Invert Hue</span>
-                                <span className="text-xs text-gray-500">Opposite colors</span>
-                              </div>
-                            </Button>
-
-                            <Button
-                                variant="outline"
-                                className="h-auto py-3"
-                                onClick={() => {
-                                  if (selectedLogoIndex === null) return
-                                  const newLogos = [...logos]
-                                  newLogos[selectedLogoIndex] = {
-                                    ...newLogos[selectedLogoIndex],
-                                    filters: {
-                                      brightness: 120,
-                                      contrast: 110,
-                                      hue: 0,
-                                      saturation: 0,
-                                    },
-                                  }
-                                  setLogos(newLogos)
-                                }}
-                                disabled={!selectedLogo}
-                            >
-                              <div className="flex flex-col items-center">
-                                <span className="font-medium">Grayscale</span>
-                                <span className="text-xs text-gray-500">Black & white</span>
-                              </div>
-                            </Button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-
-                    <TabsContent value="export" className="space-y-6 pt-4">
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Canvas Information</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-2">
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Canvas Size:</span>
-                            <span className="text-sm font-medium">
-                          {canvasSize.width} × {canvasSize.height}px
-                        </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Elements:</span>
-                            <span className="text-sm font-medium">{logos.length} logos</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-sm text-gray-600">Visible Elements:</span>
-                            <span className="text-sm font-medium">{logos.filter((l) => l.visible).length}</span>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      <Card>
-                        <CardHeader>
-                          <CardTitle>Export Settings</CardTitle>
-                          <CardDescription>Download your mockup in high quality</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="export-format">Export Format</Label>
-                            <Select defaultValue="png">
-                              <SelectTrigger id="export-format">
-                                <SelectValue placeholder="Select format" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="png">PNG Image</SelectItem>
-                                <SelectItem value="jpg">JPG Image</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label htmlFor="export-quality">Image Quality</Label>
-                            <Select defaultValue="high">
-                              <SelectTrigger id="export-quality">
-                                <SelectValue placeholder="Select quality" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="low">Low (72 DPI)</SelectItem>
-                                <SelectItem value="medium">Medium (150 DPI)</SelectItem>
-                                <SelectItem value="high">High (300 DPI)</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-
-                          <Button onClick={handleDownload} className="w-full gap-2" disabled={isDownloading}>
-                            {isDownloading ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
-                                </>
-                            ) : (
-                                <>
-                                  <Download className="h-4 w-4" /> Download Mockup
-                                </>
-                            )}
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    </TabsContent>
-                  </Tabs>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </div>
                 </div>
             )}
           </div>
@@ -2769,73 +3624,75 @@ export default function EditorPage() {
                   </div>
               ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {designHistory.map((design: DesignData) => (
-                        <Card key={design.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                          <CardContent className="p-4">
-                            <div className="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden relative">
-                              {designThumbnails[design.id] ? (
-                                  <Image
-                                      src={designThumbnails[design.id] || "/placeholder.svg"}
-                                      alt={`Preview of ${design.name}`}
-                                      fill
-                                      className="object-cover"
-                                  />
-                              ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                    {designHistory
+                        .filter((design: DesignData) => design.data?.selectedTemplate && Array.isArray(design.data?.logos))
+                        .map((design: DesignData) => (
+                            <Card key={design.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden relative">
+                                  {designThumbnails[design.id] ? (
+                                      <Image
+                                          src={designThumbnails[design.id] || "/placeholder.svg"}
+                                          alt={`Preview of ${design.name}`}
+                                          fill
+                                          className="object-cover"
+                                      />
+                                  ) : (
+                                      <div className="w-full h-full flex items-center justify-center">
+                                        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                                      </div>
+                                  )}
+
+                                  {/* Template badge */}
+                                  <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                    {templateNames[design.data.selectedTemplate] || design.data.selectedTemplate}
                                   </div>
-                              )}
 
-                              {/* Template badge */}
-                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                {templateNames[design.data.selectedTemplate] || design.data.selectedTemplate}
-                              </div>
+                                  {/* Logo count badge */}
+                                  {design.data.logos && design.data.logos.length > 0 && (
+                                      <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
+                                        {design.data.logos.length} logo{design.data.logos.length !== 1 ? "s" : ""}
+                                      </div>
+                                  )}
+                                </div>
 
-                              {/* Logo count badge */}
-                              {design.data.logos && design.data.logos.length > 0 && (
-                                  <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
-                                    {design.data.logos.length} logo{design.data.logos.length !== 1 ? "s" : ""}
+                                <div className="space-y-2">
+                                  <h4 className="font-semibold truncate">{design.name}</h4>
+                                  <div className="text-xs text-gray-500 space-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="h-3 w-3" />
+                                      Created: {new Date(design.createdAt).toLocaleDateString()}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" />
+                                      Updated: {new Date(design.updatedAt).toLocaleDateString()}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <Maximize2 className="h-3 w-3" />
+                                      {design.data.canvasSize?.width || 800} × {design.data.canvasSize?.height || 600}px
+                                    </div>
                                   </div>
-                              )}
-                            </div>
 
-                            <div className="space-y-2">
-                              <h4 className="font-semibold truncate">{design.name}</h4>
-                              <div className="text-xs text-gray-500 space-y-1">
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  Created: {new Date(design.createdAt).toLocaleDateString()}
+                                  <div className="flex gap-2 pt-2">
+                                    <Button size="sm" onClick={() => loadDesign(design)} className="flex-1">
+                                      <FileText className="h-3 w-3 mr-1" />
+                                      Load
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          deleteDesign(design.id)
+                                        }}
+                                    >
+                                      <Trash className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  Updated: {new Date(design.updatedAt).toLocaleDateString()}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Maximize2 className="h-3 w-3" />
-                                  {design.data.canvasSize?.width || 800} × {design.data.canvasSize?.height || 600}px
-                                </div>
-                              </div>
-
-                              <div className="flex gap-2 pt-2">
-                                <Button size="sm" onClick={() => loadDesign(design)} className="flex-1">
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  Load
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      deleteDesign(design.id)
-                                    }}
-                                >
-                                  <Trash className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                    ))}
+                              </CardContent>
+                            </Card>
+                        ))}
                   </div>
               )}
 

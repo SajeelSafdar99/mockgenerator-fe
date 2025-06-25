@@ -51,6 +51,10 @@ import {
   Calendar,
   FileText,
   Loader2,
+  Triangle,
+  Star,
+  Heart,
+  Hexagon,
 } from "lucide-react"
 import Link from "next/link"
 import { toast } from "@/hooks/use-toast"
@@ -71,7 +75,7 @@ interface DesignElement {
   visible: boolean
   maintainAspectRatio: boolean
   // Shape-specific properties
-  shapeType?: "rectangle" | "circle" | "triangle"
+  shapeType?: "rectangle" | "circle" | "triangle" | "star" | "heart" | "hexagon"
   fillColor?: string
   strokeColor?: string
   strokeWidth?: number
@@ -144,6 +148,7 @@ export default function LogoDesignerPage() {
   }, [user, loading])
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const [elements, setElements] = useState<DesignElement[]>([])
   const [selectedElementIndex, setSelectedElementIndex] = useState<number | null>(null)
   const [selectedElements, setSelectedElements] = useState<number[]>([])
@@ -165,6 +170,13 @@ export default function LogoDesignerPage() {
   const [mouseDown, setMouseDown] = useState(false)
   const [lastMousePos, setLastMousePos] = useState({ x: 0, y: 0 })
   const [loadedImages, setLoadedImages] = useState<Map<string, HTMLImageElement>>(new Map())
+  const [showCanvasHandles, setShowCanvasHandles] = useState(false)
+
+  // Canvas resizing states
+  const [isResizingCanvas, setIsResizingCanvas] = useState(false)
+  const [resizeDirection, setResizeDirection] = useState<string | null>(null)
+  const [initialCanvasSize, setInitialCanvasSize] = useState({ width: 500, height: 500 })
+  const [initialMousePos, setInitialMousePos] = useState({ x: 0, y: 0 })
 
   // Design History & Recent Projects
   const [designHistory, setDesignHistory] = useState<LogoDesignData[]>([])
@@ -175,6 +187,7 @@ export default function LogoDesignerPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [currentDesignId, setCurrentDesignId] = useState<string | null>(null)
   const [designThumbnails, setDesignThumbnails] = useState<Record<string, string>>({})
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   // Text input state
   const [textInput, setTextInput] = useState("")
@@ -203,17 +216,41 @@ export default function LogoDesignerPage() {
     }
   }, [user])
 
-  // Auto-save current design state every 30 seconds
+  // Auto-save current design state every 5 seconds
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
-      if (elements.length > 0 && user && currentDesignId) {
-        // Only auto-save if we have an existing design
-        saveCurrentDesign(currentDesignName || "Auto-save")
+      if (elements.length > 0 && user && currentDesignId && hasUnsavedChanges) {
+        // Only auto-save if we have an existing design and unsaved changes
+        saveCurrentDesign(currentDesignName || "Auto-save", false)
       }
-    }, 30000) // 30 seconds
+    }, 5000) // Changed from 30000 to 5000 (5 seconds)
 
     return () => clearInterval(autoSaveInterval)
-  }, [elements, canvasSize, user, currentDesignId, currentDesignName])
+  }, [elements, canvasSize, user, currentDesignId, currentDesignName, hasUnsavedChanges])
+
+  // Add auto-save trigger for any design changes (faster response)
+  useEffect(() => {
+    if (elements.length > 0 || canvasSize.width !== 500 || canvasSize.height !== 500) {
+      setHasUnsavedChanges(true)
+
+      // Auto-save after 1 second of inactivity
+      const autoSaveTimeout = setTimeout(() => {
+        if (user && hasUnsavedChanges && currentDesignId) {
+          // Only auto-save if we already have a design ID (user has named it)
+          saveCurrentDesign(currentDesignName || "Auto-save", false)
+        }
+      }, 1000)
+
+      return () => clearTimeout(autoSaveTimeout)
+    }
+  }, [elements, canvasSize, user, hasUnsavedChanges, currentDesignId, currentDesignName])
+
+  // Track changes for auto-save
+  useEffect(() => {
+    if (elements.length > 0 || canvasSize.width !== 500 || canvasSize.height !== 500) {
+      setHasUnsavedChanges(true)
+    }
+  }, [elements, canvasSize])
 
   // Initialize canvas
   useEffect(() => {
@@ -237,6 +274,27 @@ export default function LogoDesignerPage() {
   useEffect(() => {
     redrawCanvas()
   }, [elements, selectedElementIndex, selectedElements, showGrid])
+
+  // Add this useEffect after the existing useEffects (around line 200):
+  useEffect(() => {
+    // Load images for elements that don't have them loaded yet
+    elements.forEach((element) => {
+      if (element.type === "image" && element.imageUrl && !loadedImages.has(element.imageUrl)) {
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          console.log("🎨 Loaded image:", element.imageUrl)
+          setLoadedImages((prev) => new Map(prev).set(element.imageUrl!, img))
+          // Trigger a redraw after image loads
+          setTimeout(() => redrawCanvas(), 50)
+        }
+        img.onerror = (error) => {
+          console.error("🎨 Failed to load image:", element.imageUrl, error)
+        }
+        img.src = element.imageUrl
+      }
+    })
+  }, [elements, loadedImages])
 
   const redrawCanvas = () => {
     const canvas = canvasRef.current
@@ -284,6 +342,9 @@ export default function LogoDesignerPage() {
         drawSelectionIndicator(ctx, el, index)
       }
     })
+
+    // Draw canvas resize handles
+    drawCanvasResizeHandles(ctx)
   }
 
   const drawElement = (ctx: CanvasRenderingContext2D, element: DesignElement, originalIndex: number) => {
@@ -331,7 +392,129 @@ export default function LogoDesignerPage() {
           ctx.stroke()
         }
         break
+      case "triangle":
+        ctx.beginPath()
+        ctx.moveTo(element.size.width / 2, 0)
+        ctx.lineTo(0, element.size.height)
+        ctx.lineTo(element.size.width, element.size.height)
+        ctx.closePath()
+        ctx.fill()
+        if (element.strokeWidth && element.strokeWidth > 0) {
+          ctx.stroke()
+        }
+        break
+      case "star":
+        drawStar(
+            ctx,
+            element.size.width / 2,
+            element.size.height / 2,
+            5,
+            Math.min(element.size.width, element.size.height) / 4,
+            Math.min(element.size.width, element.size.height) / 8,
+        )
+        ctx.fill()
+        if (element.strokeWidth && element.strokeWidth > 0) {
+          ctx.stroke()
+        }
+        break
+      case "heart":
+        drawHeart(
+            ctx,
+            element.size.width / 2,
+            element.size.height / 2,
+            Math.min(element.size.width, element.size.height) / 2,
+        )
+        ctx.fill()
+        if (element.strokeWidth && element.strokeWidth > 0) {
+          ctx.stroke()
+        }
+        break
+      case "hexagon":
+        drawHexagon(
+            ctx,
+            element.size.width / 2,
+            element.size.height / 2,
+            Math.min(element.size.width, element.size.height) / 2,
+        )
+        ctx.fill()
+        if (element.strokeWidth && element.strokeWidth > 0) {
+          ctx.stroke()
+        }
+        break
     }
+  }
+
+  // Helper functions for drawing complex shapes
+  const drawStar = (
+      ctx: CanvasRenderingContext2D,
+      cx: number,
+      cy: number,
+      spikes: number,
+      outerRadius: number,
+      innerRadius: number,
+  ) => {
+    let rot = (Math.PI / 2) * 3
+    let x = cx
+    let y = cy
+    const step = Math.PI / spikes
+
+    ctx.beginPath()
+    ctx.moveTo(cx, cy - outerRadius)
+    for (let i = 0; i < spikes; i++) {
+      x = cx + Math.cos(rot) * outerRadius
+      y = cy + Math.sin(rot) * outerRadius
+      ctx.lineTo(x, y)
+      rot += step
+
+      x = cx + Math.cos(rot) * innerRadius
+      y = cy + Math.sin(rot) * innerRadius
+      ctx.lineTo(x, y)
+      rot += step
+    }
+    ctx.lineTo(cx, cy - outerRadius)
+    ctx.closePath()
+  }
+
+  const drawHeart = (ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) => {
+    ctx.beginPath()
+    const topCurveHeight = size * 0.3
+    ctx.moveTo(cx, cy + topCurveHeight)
+    // Left curve
+    ctx.bezierCurveTo(cx, cy, cx - size / 2, cy, cx - size / 2, cy + topCurveHeight)
+    ctx.bezierCurveTo(
+        cx - size / 2,
+        cy + (size + topCurveHeight) / 2,
+        cx,
+        cy + (size + topCurveHeight) / 2,
+        cx,
+        cy + size,
+    )
+    // Right curve
+    ctx.bezierCurveTo(
+        cx,
+        cy + (size + topCurveHeight) / 2,
+        cx + size / 2,
+        cy + (size + topCurveHeight) / 2,
+        cx + size / 2,
+        cy + topCurveHeight,
+    )
+    ctx.bezierCurveTo(cx + size / 2, cy, cx, cy, cx, cy + topCurveHeight)
+    ctx.closePath()
+  }
+
+  const drawHexagon = (ctx: CanvasRenderingContext2D, cx: number, cy: number, size: number) => {
+    ctx.beginPath()
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i
+      const x = cx + size * Math.cos(angle)
+      const y = cy + size * Math.sin(angle)
+      if (i === 0) {
+        ctx.moveTo(x, y)
+      } else {
+        ctx.lineTo(x, y)
+      }
+    }
+    ctx.closePath()
   }
 
   const drawText = (ctx: CanvasRenderingContext2D, element: DesignElement) => {
@@ -339,17 +522,19 @@ export default function LogoDesignerPage() {
     ctx.font = `${element.fontStyle || "normal"} ${element.fontWeight || "normal"} ${element.fontSize || 24}px ${element.fontFamily || "Arial"}`
 
     // Set text alignment and baseline
-    ctx.textAlign = (element.textAlign as CanvasTextAlign) || "left"
-    ctx.textBaseline = "top"
+    ctx.textAlign = (element.textAlign as CanvasTextAlign) || "center"
+    ctx.textBaseline = "middle"
 
     let x = 0
     if (element.textAlign === "center") {
       x = element.size.width / 2
     } else if (element.textAlign === "right") {
       x = element.size.width
+    } else {
+      x = 0
     }
 
-    const y = 0 // Start from top of the element bounds
+    const y = element.size.height / 2 // Center vertically
 
     ctx.fillText(element.text || "", x, y)
   }
@@ -426,6 +611,30 @@ export default function LogoDesignerPage() {
     ctx.restore()
   }
 
+  const drawCanvasResizeHandles = (ctx: CanvasRenderingContext2D) => {
+    // Only draw resize handles when canvas is being resized or hovered
+    if (!isResizingCanvas && !showCanvasHandles) return
+
+    const handleSize = 12
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    // Draw resize handles at canvas corners and edges
+    const handles = [
+      { x: canvas.width - handleSize, y: canvas.height - handleSize, cursor: "nw-resize", direction: "se" }, // bottom-right
+      { x: canvas.width - handleSize, y: canvas.height / 2 - handleSize / 2, cursor: "ew-resize", direction: "e" }, // right-center
+      { x: canvas.width / 2 - handleSize / 2, y: canvas.height - handleSize, cursor: "ns-resize", direction: "s" }, // bottom-center
+    ]
+
+    handles.forEach((handle) => {
+      ctx.fillStyle = "#3b82f6"
+      ctx.fillRect(handle.x, handle.y, handleSize, handleSize)
+      ctx.strokeStyle = "#ffffff"
+      ctx.lineWidth = 2
+      ctx.strokeRect(handle.x, handle.y, handleSize, handleSize)
+    })
+  }
+
   const saveCanvasState = () => {
     const canvas = canvasRef.current
     if (!canvas) return
@@ -489,7 +698,31 @@ export default function LogoDesignerPage() {
     }
   }
 
-  const addShape = (shapeType: "rectangle" | "circle") => {
+  const addShape = (shapeType: "rectangle" | "circle" | "triangle" | "star" | "heart" | "hexagon") => {
+    // If this is the first element and no current design, ask user to save with a name
+    if (elements.length === 0 && !currentDesignId && user) {
+      const newElement = createElement("shape", {
+        shapeType,
+        fillColor: shapeStyle.fillColor,
+        strokeColor: shapeStyle.strokeColor,
+        strokeWidth: shapeStyle.strokeWidth,
+      })
+
+      setElements([newElement])
+      setSelectedElementIndex(0)
+      saveCanvasState()
+
+      setTimeout(() => {
+        setShowSaveDialog(true)
+      }, 500)
+
+      toast({
+        title: "Shape Added",
+        description: `${shapeType} has been added. Please save your design to continue.`,
+      })
+      return
+    }
+
     const newElement = createElement("shape", {
       shapeType,
       fillColor: shapeStyle.fillColor,
@@ -541,6 +774,24 @@ export default function LogoDesignerPage() {
       size: { width: textWidth, height: textHeight },
     })
 
+    // If this is the first element and no current design, ask user to save with a name
+    if (elements.length === 0 && !currentDesignId && user) {
+      setElements([newElement])
+      setSelectedElementIndex(0)
+      setTextInput("")
+      saveCanvasState()
+
+      setTimeout(() => {
+        setShowSaveDialog(true)
+      }, 500)
+
+      toast({
+        title: "Text Added",
+        description: "Text has been added. Please save your design to continue.",
+      })
+      return
+    }
+
     setElements([...elements, newElement])
     setSelectedElementIndex(elements.length)
     setTextInput("")
@@ -552,17 +803,89 @@ export default function LogoDesignerPage() {
     })
   }
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return
 
     const file = e.target.files[0]
-    const reader = new FileReader()
+    const allowedTypes = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml"]
 
-    reader.onload = (event) => {
-      if (!event.target?.result) return
+    if (!allowedTypes.includes(file.type)) {
+      toast({
+        title: "Unsupported File",
+        description: "Only SVG, PNG, and JPG images are allowed.",
+        variant: "destructive",
+      })
+      return
+    }
 
-      const imageUrl = event.target.result as string
-      const img = new Image()
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      toast({
+        title: "File Too Large",
+        description: "Please upload an image smaller than 10MB.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!user) {
+      toast({
+        title: "Authentication Required",
+        description: "Please log in to upload images.",
+        variant: "destructive",
+      })
+      setShowAuthModal(true)
+      return
+    }
+
+    try {
+      // Create form data
+      const formData = new FormData()
+      formData.append("image", file)
+
+      // Upload to backend directly
+      const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+      const uploadUrl = `${BACKEND_URL}/api/uploads/upload`
+
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${getAuthToken()}`,
+        },
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Upload failed")
+      }
+
+      const uploadData = await response.json()
+
+      // Extract the correct URL from the response
+      let imageUrl = null
+      if (uploadData.data && uploadData.data.url) {
+        imageUrl = uploadData.data.url
+      } else if (uploadData.data && uploadData.data.fileUrl) {
+        imageUrl = uploadData.data.fileUrl
+      } else if (uploadData.url) {
+        imageUrl = uploadData.url
+      } else if (uploadData.fileUrl) {
+        imageUrl = uploadData.fileUrl
+      }
+
+      // Transform localhost URLs to use the correct backend URL
+      if (imageUrl && imageUrl.includes("localhost:3001")) {
+        imageUrl = imageUrl.replace("http://localhost:3001", BACKEND_URL)
+      }
+
+      if (!imageUrl) {
+        throw new Error("No image URL returned from server")
+      }
+
+      // Load the image to get dimensions
+      const img = new window.Image()
+      img.crossOrigin = "anonymous"
 
       img.onload = () => {
         const maxSize = 200
@@ -580,7 +903,7 @@ export default function LogoDesignerPage() {
 
         const newElement = createElement("image", {
           imageUrl: imageUrl,
-          imageFile: file,
+          imageFile: undefined, // Don't store file, use URL
           size: { width, height },
           // Center the image on canvas
           position: {
@@ -593,16 +916,84 @@ export default function LogoDesignerPage() {
         setSelectedElementIndex(elements.length)
         saveCanvasState()
 
+        // If this is the first element and no current design, ask user to save with a name
+        if (elements.length === 0 && !currentDesignId && user) {
+          setTimeout(() => {
+            setShowSaveDialog(true)
+          }, 500)
+        }
+
         toast({
-          title: "Image Added",
-          description: "Image has been added to your design.",
+          title: "Image Uploaded!",
+          description: "Image has been uploaded and added to your design.",
         })
       }
 
+      img.onerror = () => {
+        throw new Error("Failed to load uploaded image")
+      }
+
       img.src = imageUrl
+    } catch (error) {
+      console.error("🎨 Upload error:", error)
+
+      // Fallback: create blob URL for immediate use
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        if (!event.target?.result) return
+
+        const imageUrl = event.target.result as string
+        const img = new window.Image()
+
+        img.onload = () => {
+          const maxSize = 200
+          let width = img.width
+          let height = img.height
+
+          if (width > maxSize || height > maxSize) {
+            const ratio = Math.min(maxSize / width, maxSize / height)
+            width *= ratio
+            height *= ratio
+          }
+
+          // Store the loaded image
+          setLoadedImages((prev) => new Map(prev).set(imageUrl, img))
+
+          const newElement = createElement("image", {
+            imageUrl: imageUrl,
+            imageFile: file,
+            size: { width, height },
+            position: {
+              x: canvasSize.width / 2 - width / 2,
+              y: canvasSize.height / 2 - height / 2,
+            },
+          })
+
+          setElements([...elements, newElement])
+          setSelectedElementIndex(elements.length)
+          saveCanvasState()
+
+          if (elements.length === 0 && !currentDesignId && user) {
+            setTimeout(() => {
+              setShowSaveDialog(true)
+            }, 500)
+          }
+
+          toast({
+            title: "Upload Failed - Using Local Copy",
+            description: "Image added locally. Save your design to try uploading again.",
+            variant: "default",
+          })
+        }
+
+        img.src = imageUrl
+      }
+
+      reader.readAsDataURL(file)
     }
 
-    reader.readAsDataURL(file)
+    // Reset the input value
+    e.target.value = ""
   }
 
   // Layer management functions
@@ -790,8 +1181,8 @@ export default function LogoDesignerPage() {
     exportCanvas.height = canvasSize.height
 
     // Fill with white background
-    exportCtx.fillStyle = "white"
-    exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height)
+    // exportCtx.fillStyle = "white"
+    // exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height)
 
     // Draw all visible elements
     const sortedElements = elements.filter((el) => el.visible).sort((a, b) => a.zIndex - b.zIndex)
@@ -825,6 +1216,65 @@ export default function LogoDesignerPage() {
     }
   }
 
+  const findElementResizeHandle = (x: number, y: number, elementIndex: number) => {
+    if (elementIndex === -1) return null
+
+    const element = elements[elementIndex]
+    const handleSize = 8
+    const padding = 4
+
+    const handles = [
+      { x: element.position.x - handleSize / 2, y: element.position.y - handleSize / 2, direction: "nw" },
+      {
+        x: element.position.x + element.size.width - handleSize / 2,
+        y: element.position.y - handleSize / 2,
+        direction: "ne",
+      },
+      {
+        x: element.position.x - handleSize / 2,
+        y: element.position.y + element.size.height - handleSize / 2,
+        direction: "sw",
+      },
+      {
+        x: element.position.x + element.size.width - handleSize / 2,
+        y: element.position.y + element.size.height - handleSize / 2,
+        direction: "se",
+      },
+      {
+        x: element.position.x + element.size.width / 2 - handleSize / 2,
+        y: element.position.y - handleSize / 2,
+        direction: "n",
+      },
+      {
+        x: element.position.x + element.size.width / 2 - handleSize / 2,
+        y: element.position.y + element.size.height - handleSize / 2,
+        direction: "s",
+      },
+      {
+        x: element.position.x - handleSize / 2,
+        y: element.position.y + element.size.height / 2 - handleSize / 2,
+        direction: "w",
+      },
+      {
+        x: element.position.x + element.size.width - handleSize / 2,
+        y: element.position.y + element.size.height / 2 - handleSize / 2,
+        direction: "e",
+      },
+    ]
+
+    for (const handle of handles) {
+      if (
+          x >= handle.x - padding &&
+          x <= handle.x + handleSize + padding &&
+          y >= handle.y - padding &&
+          y <= handle.y + handleSize + padding
+      ) {
+        return handle.direction
+      }
+    }
+    return null
+  }
+
   const findElementAtPosition = (x: number, y: number) => {
     // Find clicked element (topmost first)
     const sortedElements = elements
@@ -835,35 +1285,15 @@ export default function LogoDesignerPage() {
     for (const { el, index } of sortedElements) {
       // For text elements, we need to account for the actual text bounds
       if (el.type === "text") {
-        // Create a temporary canvas to measure text
-        const tempCanvas = document.createElement("canvas")
-        const tempCtx = tempCanvas.getContext("2d")
-        if (tempCtx) {
-          tempCtx.font = `${el.fontStyle || "normal"} ${el.fontWeight || "normal"} ${el.fontSize || 24}px ${el.fontFamily || "Arial"}`
-          const textMetrics = tempCtx.measureText(el.text || "")
-          const textWidth = textMetrics.width
-          const textHeight = el.fontSize || 24
-
-          // Adjust hit area based on text alignment
-          let hitX = el.position.x
-          const hitWidth = textWidth
-
-          if (el.textAlign === "center") {
-            hitX = el.position.x + el.size.width / 2 - textWidth / 2
-          } else if (el.textAlign === "right") {
-            hitX = el.position.x + el.size.width - textWidth
-          }
-
-          // Use a slightly larger hit area for easier selection
-          const padding = 5
-          if (
-              x >= hitX - padding &&
-              x <= hitX + textWidth + padding &&
-              y >= el.position.y - padding &&
-              y <= el.position.y + el.size.height + padding
-          ) {
-            return index
-          }
+        // Use the full element bounds for text selection with generous padding
+        const padding = 10
+        if (
+            x >= el.position.x - padding &&
+            x <= el.position.x + el.size.width + padding &&
+            y >= el.position.y - padding &&
+            y <= el.position.y + el.size.height + padding
+        ) {
+          return index
         }
       } else {
         // For shapes and images, use the normal bounding box
@@ -880,9 +1310,55 @@ export default function LogoDesignerPage() {
     return -1
   }
 
+  const findCanvasResizeHandle = (x: number, y: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+
+    const handleSize = 12
+    const handles = [
+      { x: canvas.width - handleSize, y: canvas.height - handleSize, direction: "se" },
+      { x: canvas.width - handleSize, y: canvas.height / 2 - handleSize / 2, direction: "e" },
+      { x: canvas.width / 2 - handleSize / 2, y: canvas.height - handleSize, direction: "s" },
+    ]
+
+    for (const handle of handles) {
+      if (x >= handle.x && x <= handle.x + handleSize && y >= handle.y && y <= handle.y + handleSize) {
+        return handle.direction
+      }
+    }
+    return null
+  }
+
   const handleMouseDown = (e: React.MouseEvent) => {
     const coords = getCanvasCoordinates(e)
+
+    // Check if clicking on canvas resize handle first
+    const canvasResizeDirection = findCanvasResizeHandle(coords.x, coords.y)
+    if (canvasResizeDirection) {
+      setIsResizingCanvas(true)
+      setResizeDirection(canvasResizeDirection)
+      setInitialCanvasSize({ ...canvasSize })
+      setInitialMousePos(coords)
+      return
+    }
+
     const clickedIndex = findElementAtPosition(coords.x, coords.y)
+
+    // Check for element resize handles if an element is selected
+    if (selectedElementIndex !== null && clickedIndex === selectedElementIndex) {
+      const elementResizeDirection = findElementResizeHandle(coords.x, coords.y, selectedElementIndex)
+      if (elementResizeDirection) {
+        setIsResizing(true)
+        setResizeHandle(elementResizeDirection)
+        setInitialMousePos(coords)
+        const element = elements[selectedElementIndex]
+        setDragOffset({
+          x: element.position.x,
+          y: element.position.y,
+        })
+        return
+      }
+    }
 
     setMouseDown(true)
     setLastMousePos(coords)
@@ -914,9 +1390,87 @@ export default function LogoDesignerPage() {
   }
 
   const handleMouseMove = (e: React.MouseEvent) => {
+    const coords = getCanvasCoordinates(e)
+
+    if (isResizingCanvas && resizeDirection) {
+      const deltaX = coords.x - initialMousePos.x
+      const deltaY = coords.y - initialMousePos.y
+
+      let newWidth = initialCanvasSize.width
+      let newHeight = initialCanvasSize.height
+
+      if (resizeDirection.includes("e")) {
+        newWidth = Math.max(200, initialCanvasSize.width + deltaX)
+      }
+      if (resizeDirection.includes("s")) {
+        newHeight = Math.max(200, initialCanvasSize.height + deltaY)
+      }
+
+      setCanvasSize({ width: newWidth, height: newHeight })
+      return
+    }
+
+    if (isResizing && resizeHandle && selectedElementIndex !== null) {
+      const element = elements[selectedElementIndex]
+      const deltaX = coords.x - initialMousePos.x
+      const deltaY = coords.y - initialMousePos.y
+
+      const newElements = [...elements]
+      let newWidth = element.size.width
+      let newHeight = element.size.height
+      let newX = element.position.x
+      let newY = element.position.y
+
+      // Handle different resize directions
+      if (resizeHandle.includes("e")) {
+        newWidth = Math.max(20, element.size.width + deltaX)
+      }
+      if (resizeHandle.includes("w")) {
+        const widthChange = element.size.width - Math.max(20, element.size.width - deltaX)
+        newWidth = Math.max(20, element.size.width - deltaX)
+        newX = element.position.x + widthChange
+      }
+      if (resizeHandle.includes("s")) {
+        newHeight = Math.max(20, element.size.height + deltaY)
+      }
+      if (resizeHandle.includes("n")) {
+        const heightChange = element.size.height - Math.max(20, element.size.height - deltaY)
+        newHeight = Math.max(20, element.size.height - deltaY)
+        newY = element.position.y + heightChange
+      }
+
+      // Maintain aspect ratio if enabled
+      if (element.maintainAspectRatio) {
+        const aspectRatio = element.size.width / element.size.height
+
+        // For corner handles, maintain aspect ratio
+        if (resizeHandle === "se" || resizeHandle === "nw" || resizeHandle === "ne" || resizeHandle === "sw") {
+          if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            newHeight = newWidth / aspectRatio
+            if (resizeHandle.includes("n")) {
+              newY = element.position.y + element.size.height - newHeight
+            }
+          } else {
+            newWidth = newHeight * aspectRatio
+            if (resizeHandle.includes("w")) {
+              newX = element.position.x + element.size.width - newWidth
+            }
+          }
+        }
+      }
+
+      newElements[selectedElementIndex] = {
+        ...element,
+        position: { x: newX, y: newY },
+        size: { width: newWidth, height: newHeight },
+      }
+      setElements(newElements)
+      return
+    }
+
+    // Handle dragging elements
     if (!mouseDown || !isDragging || selectedElementIndex === null) return
 
-    const coords = getCanvasCoordinates(e)
     const element = elements[selectedElementIndex]
 
     if (element && !element.locked) {
@@ -940,11 +1494,16 @@ export default function LogoDesignerPage() {
   }
 
   const handleMouseUp = () => {
-    if (isDragging) {
+    if (isDragging || isResizing || isResizingCanvas) {
       saveCanvasState()
     }
+
     setMouseDown(false)
     setIsDragging(false)
+    setIsResizing(false)
+    setIsResizingCanvas(false)
+    setResizeHandle(null)
+    setResizeDirection(null)
     setDragOffset({ x: 0, y: 0 })
   }
 
@@ -981,13 +1540,15 @@ export default function LogoDesignerPage() {
   }
 
   // Design History Functions - Using same API as mockup editor
-  const saveCurrentDesign = async (name?: string) => {
+  const saveCurrentDesign = async (name?: string, showToast = true) => {
     if (!user) {
-      toast({
-        title: "Authentication Required",
-        description: "Please log in to save your design.",
-        variant: "destructive",
-      })
+      if (showToast) {
+        toast({
+          title: "Authentication Required",
+          description: "Please log in to save your design.",
+          variant: "destructive",
+        })
+      }
       return
     }
 
@@ -995,11 +1556,11 @@ export default function LogoDesignerPage() {
     setIsSaving(true)
 
     try {
-      // Prepare elements data for saving - filter out blob URLs and files
+      // Prepare elements data for saving - keep permanent URLs
       const elementsToSave = elements.map((element) => ({
         ...element,
         imageFile: undefined, // Don't save file objects
-        imageUrl: element.imageUrl && element.imageUrl.startsWith("data:") ? undefined : element.imageUrl, // Only save permanent URLs
+        imageUrl: element.imageUrl && element.imageUrl.startsWith("blob:") ? undefined : element.imageUrl, // Only save permanent URLs, skip blob URLs
       }))
 
       console.log("🎨 Saving logo design with elements:", elementsToSave)
@@ -1025,7 +1586,7 @@ export default function LogoDesignerPage() {
             ? `${BACKEND_URL}/api/designs/update?designId=${currentDesignId}`
             : `${BACKEND_URL}/api/designs/create`
 
-        console.log("🎨 Saving logo design to:", endpoint)
+        console.log("🎨 Saving logo design to:", endpoint, "with ID:", currentDesignId)
 
         const response = await fetch(endpoint, {
           method: currentDesignId ? "PUT" : "POST",
@@ -1046,16 +1607,21 @@ export default function LogoDesignerPage() {
 
         // Update current design ID if this was a new design
         if (!currentDesignId) {
-          setCurrentDesignId(savedDesign.id)
+          const newId = savedDesign.id || savedDesign.data?.id || Date.now().toString()
+          setCurrentDesignId(newId)
+          console.log("🎨 Set new design ID:", newId)
         }
 
         // Reload design history
         await loadDesignHistory()
+        setHasUnsavedChanges(false)
 
-        toast({
-          title: "Design Saved!",
-          description: `"${designName}" has been saved successfully.`,
-        })
+        if (showToast) {
+          toast({
+            title: "Design Saved!",
+            description: `"${designName}" has been saved successfully.`,
+          })
+        }
       } catch (apiError) {
         console.error("🎨 API save failed, using local storage:", apiError)
 
@@ -1086,22 +1652,28 @@ export default function LogoDesignerPage() {
           setCurrentDesignId(fallbackDesign.id)
         }
 
-        toast({
-          title: "Design Saved Locally!",
-          description: `"${designName}" has been saved to local storage.`,
-          variant: "default",
-        })
+        setHasUnsavedChanges(false)
+
+        if (showToast) {
+          toast({
+            title: "Design Saved Locally!",
+            description: `"${designName}" has been saved to local storage.`,
+            variant: "default",
+          })
+        }
       }
 
       setCurrentDesignName(designName)
       setShowSaveDialog(false)
     } catch (error) {
       console.error("🎨 Save failed:", error)
-      toast({
-        title: "Save Failed",
-        description: "There was an error saving your design.",
-        variant: "destructive",
-      })
+      if (showToast) {
+        toast({
+          title: "Save Failed",
+          description: "There was an error saving your design.",
+          variant: "destructive",
+        })
+      }
     } finally {
       setIsSaving(false)
     }
@@ -1133,7 +1705,32 @@ export default function LogoDesignerPage() {
 
       console.log("🎨 Restored elements:", restoredElements)
       setElements(restoredElements)
+
+      // Force immediate redraw
+      setTimeout(() => {
+        redrawCanvas()
+      }, 50)
+
+      // Load images for restored elements
+      restoredElements.forEach((element) => {
+        if (element.type === "image" && element.imageUrl && !element.imageUrl.startsWith("blob:")) {
+          const img = new window.Image()
+          img.crossOrigin = "anonymous"
+          img.onload = () => {
+            console.log("🎨 Loaded image for restored element:", element.imageUrl)
+            setLoadedImages((prev) => new Map(prev).set(element.imageUrl!, img))
+            // Trigger a redraw
+            setTimeout(() => redrawCanvas(), 100)
+          }
+          img.onerror = (error) => {
+            console.error("🎨 Failed to load image for restored element:", element.imageUrl, error)
+          }
+          img.src = element.imageUrl
+        }
+      })
+
       setShowHistoryModal(false)
+      setHasUnsavedChanges(false)
 
       toast({
         title: "Design Loaded!",
@@ -1235,6 +1832,23 @@ export default function LogoDesignerPage() {
           .filter((element) => element.visible)
           .sort((a, b) => a.zIndex - b.zIndex)
 
+      if (visibleElements.length === 0) {
+        ctx.restore()
+        resolve(canvas.toDataURL("image/jpeg", 0.8))
+        return
+      }
+
+      let processedElements = 0
+      const totalElements = visibleElements.length
+
+      const checkComplete = () => {
+        processedElements++
+        if (processedElements === totalElements) {
+          ctx.restore()
+          resolve(canvas.toDataURL("image/jpeg", 0.8))
+        }
+      }
+
       visibleElements.forEach((element) => {
         ctx.save()
 
@@ -1263,13 +1877,25 @@ export default function LogoDesignerPage() {
               if (element.strokeWidth && element.strokeWidth > 0) {
                 ctx.stroke()
               }
+            } else if (element.shapeType === "triangle") {
+              ctx.beginPath()
+              ctx.moveTo(element.size.width / 2, 0)
+              ctx.lineTo(0, element.size.height)
+              ctx.lineTo(element.size.width, element.size.height)
+              ctx.closePath()
+              ctx.fill()
+              if (element.strokeWidth && element.strokeWidth > 0) {
+                ctx.stroke()
+              }
             }
+            ctx.restore()
+            checkComplete()
             break
           case "text":
             ctx.fillStyle = element.textColor || "#000000"
             ctx.font = `${element.fontStyle || "normal"} ${element.fontWeight || "normal"} ${element.fontSize || 24}px ${element.fontFamily || "Arial"}`
-            ctx.textAlign = (element.textAlign as CanvasTextAlign) || "left"
-            ctx.textBaseline = "top"
+            ctx.textAlign = (element.textAlign as CanvasTextAlign) || "center"
+            ctx.textBaseline = "middle"
 
             let x = 0
             if (element.textAlign === "center") {
@@ -1278,23 +1904,48 @@ export default function LogoDesignerPage() {
               x = element.size.width
             }
 
-            ctx.fillText(element.text || "", x, 0)
+            ctx.fillText(element.text || "", x, element.size.height / 2)
+            ctx.restore()
+            checkComplete()
             break
           case "image":
-            // For thumbnails, just draw a placeholder for images
-            ctx.fillStyle = "#f3f4f6"
-            ctx.fillRect(0, 0, element.size.width, element.size.height)
-            ctx.strokeStyle = "#d1d5db"
-            ctx.lineWidth = 2
-            ctx.strokeRect(0, 0, element.size.width, element.size.height)
+            // Try to load and draw the actual image for thumbnails
+            if (element.imageUrl && !element.imageUrl.startsWith("blob:") && !element.imageUrl.startsWith("data:")) {
+              const img = new window.Image()
+              img.crossOrigin = "anonymous"
+              img.onload = () => {
+                ctx.drawImage(img, 0, 0, element.size.width, element.size.height)
+                ctx.restore()
+                checkComplete()
+              }
+              img.onerror = () => {
+                // Fallback to placeholder
+                ctx.fillStyle = "#f3f4f6"
+                ctx.fillRect(0, 0, element.size.width, element.size.height)
+                ctx.strokeStyle = "#d1d5db"
+                ctx.lineWidth = 2
+                ctx.strokeRect(0, 0, element.size.width, element.size.height)
+                ctx.restore()
+                checkComplete()
+              }
+              img.src = element.imageUrl
+            } else {
+              // Draw placeholder for local/blob images
+              ctx.fillStyle = "#f3f4f6"
+              ctx.fillRect(0, 0, element.size.width, element.size.height)
+              ctx.strokeStyle = "#d1d5db"
+              ctx.lineWidth = 2
+              ctx.strokeRect(0, 0, element.size.width, element.size.height)
+              ctx.restore()
+              checkComplete()
+            }
+            break
+          default:
+            ctx.restore()
+            checkComplete()
             break
         }
-
-        ctx.restore()
       })
-
-      ctx.restore()
-      resolve(canvas.toDataURL("image/jpeg", 0.8))
     })
   }
 
@@ -1385,6 +2036,161 @@ export default function LogoDesignerPage() {
       setDesignThumbnails(thumbnails)
     }
   }
+
+  // Set up event listeners
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (isDragging || isResizing || isResizingCanvas) {
+        // Convert global mouse event to canvas coordinates
+        const canvas = canvasRef.current
+        if (!canvas) return
+
+        const rect = canvas.getBoundingClientRect()
+        const coords = {
+          x: e.clientX - rect.left,
+          y: e.clientY - rect.top,
+        }
+
+        // Handle canvas resizing
+        if (isResizingCanvas && resizeDirection) {
+          const deltaX = coords.x - initialMousePos.x
+          const deltaY = coords.y - initialMousePos.y
+
+          let newWidth = initialCanvasSize.width
+          let newHeight = initialCanvasSize.height
+
+          if (resizeDirection.includes("e")) {
+            newWidth = Math.max(200, initialCanvasSize.width + deltaX)
+          }
+          if (resizeDirection.includes("s")) {
+            newHeight = Math.max(200, initialCanvasSize.height + deltaY)
+          }
+
+          setCanvasSize({ width: newWidth, height: newHeight })
+          return
+        }
+
+        // Handle element resizing
+        if (isResizing && resizeHandle && selectedElementIndex !== null) {
+          const element = elements[selectedElementIndex]
+          const deltaX = coords.x - initialMousePos.x
+          const deltaY = coords.y - initialMousePos.y
+
+          const newElements = [...elements]
+          let newWidth = element.size.width
+          let newHeight = element.size.height
+          let newX = element.position.x
+          let newY = element.position.y
+
+          // Handle different resize directions
+          if (resizeHandle.includes("e")) {
+            newWidth = Math.max(20, element.size.width + deltaX)
+          }
+          if (resizeHandle.includes("w")) {
+            const widthChange = element.size.width - Math.max(20, element.size.width - deltaX)
+            newWidth = Math.max(20, element.size.width - deltaX)
+            newX = element.position.x + widthChange
+          }
+          if (resizeHandle.includes("s")) {
+            newHeight = Math.max(20, element.size.height + deltaY)
+          }
+          if (resizeHandle.includes("n")) {
+            const heightChange = element.size.height - Math.max(20, element.size.height - deltaY)
+            newHeight = Math.max(20, element.size.height - deltaY)
+            newY = element.position.y + heightChange
+          }
+
+          // Maintain aspect ratio if enabled
+          if (element.maintainAspectRatio) {
+            const aspectRatio = element.size.width / element.size.height
+
+            // For corner handles, maintain aspect ratio
+            if (resizeHandle === "se" || resizeHandle === "nw" || resizeHandle === "ne" || resizeHandle === "sw") {
+              if (Math.abs(deltaX) > Math.abs(deltaY)) {
+                newHeight = newWidth / aspectRatio
+                if (resizeHandle.includes("n")) {
+                  newY = element.position.y + element.size.height - newHeight
+                }
+              } else {
+                newWidth = newHeight * aspectRatio
+                if (resizeHandle.includes("w")) {
+                  newX = element.position.x + element.size.width - newWidth
+                }
+              }
+            }
+          }
+
+          newElements[selectedElementIndex] = {
+            ...element,
+            position: { x: newX, y: newY },
+            size: { width: newWidth, height: newHeight },
+          }
+          setElements(newElements)
+          return
+        }
+
+        // Handle element dragging
+        if (isDragging && selectedElementIndex !== null) {
+          const element = elements[selectedElementIndex]
+
+          if (element && !element.locked) {
+            const newElements = [...elements]
+            let newX = coords.x - dragOffset.x
+            let newY = coords.y - dragOffset.y
+
+            // Snap to grid if enabled
+            if (snapToGrid) {
+              newX = Math.round(newX / gridSize) * gridSize
+              newY = Math.round(newY / gridSize) * gridSize
+            }
+
+            // Keep within canvas bounds
+            newX = Math.max(0, Math.min(newX, canvasSize.width - element.size.width))
+            newY = Math.max(0, Math.min(newY, canvasSize.height - element.size.height))
+
+            newElements[selectedElementIndex].position = { x: newX, y: newY }
+            setElements(newElements)
+          }
+        }
+      }
+    }
+
+    const handleGlobalMouseUp = () => {
+      if (isDragging || isResizing || isResizingCanvas) {
+        saveCanvasState()
+      }
+
+      setMouseDown(false)
+      setIsDragging(false)
+      setIsResizing(false)
+      setIsResizingCanvas(false)
+      setResizeHandle(null)
+      setResizeDirection(null)
+      setDragOffset({ x: 0, y: 0 })
+    }
+
+    window.addEventListener("mousemove", handleGlobalMouseMove)
+    window.addEventListener("mouseup", handleGlobalMouseUp)
+
+    return () => {
+      window.removeEventListener("mousemove", handleGlobalMouseMove)
+      window.removeEventListener("mouseup", handleGlobalMouseUp)
+    }
+  }, [
+    isDragging,
+    isResizing,
+    isResizingCanvas,
+    selectedElementIndex,
+    elements,
+    dragOffset,
+    resizeHandle,
+    resizeDirection,
+    initialMousePos,
+    initialCanvasSize,
+    snapToGrid,
+    gridSize,
+    canvasSize,
+  ])
 
   // Always render the full layout - authentication is handled via modal only
   return (
@@ -1547,6 +2353,22 @@ export default function LogoDesignerPage() {
                         <Button variant="outline" onClick={() => addShape("circle")} className="h-16 flex-col gap-1">
                           <Circle className="h-6 w-6" />
                           <span className="text-xs">Circle</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => addShape("triangle")} className="h-16 flex-col gap-1">
+                          <Triangle className="h-6 w-6" />
+                          <span className="text-xs">Triangle</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => addShape("star")} className="h-16 flex-col gap-1">
+                          <Star className="h-6 w-6" />
+                          <span className="text-xs">Star</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => addShape("heart")} className="h-16 flex-col gap-1">
+                          <Heart className="h-6 w-6" />
+                          <span className="text-xs">Heart</span>
+                        </Button>
+                        <Button variant="outline" onClick={() => addShape("hexagon")} className="h-16 flex-col gap-1">
+                          <Hexagon className="h-6 w-6" />
+                          <span className="text-xs">Hexagon</span>
                         </Button>
                       </div>
 
@@ -1787,13 +2609,26 @@ export default function LogoDesignerPage() {
               <Card>
                 <CardContent className="p-6">
                   <div className="flex justify-center">
-                    <div className="relative border-2 border-gray-200 rounded-lg overflow-hidden">
+                    <div
+                        ref={containerRef}
+                        className="relative border-2 border-gray-200 rounded-lg overflow-hidden"
+                        style={{
+                          cursor: isResizingCanvas
+                              ? resizeDirection === "se"
+                                  ? "nw-resize"
+                                  : resizeDirection === "e"
+                                      ? "ew-resize"
+                                      : "ns-resize"
+                              : "default",
+                        }}
+                    >
                       <canvas
                           ref={canvasRef}
                           onMouseDown={handleMouseDown}
                           onMouseMove={handleMouseMove}
                           onMouseUp={handleMouseUp}
                           onMouseLeave={handleMouseUp}
+                          onMouseEnter={() => setShowCanvasHandles(true)}
                           className="cursor-crosshair"
                           style={{ maxWidth: "100%", height: "auto" }}
                       />
@@ -1801,6 +2636,7 @@ export default function LogoDesignerPage() {
                   </div>
                   <div className="mt-4 text-center text-sm text-gray-500">
                     Canvas: {canvasSize.width} × {canvasSize.height}px | Elements: {elements.length}
+                    {hasUnsavedChanges && <span className="text-orange-500 ml-2">• Unsaved changes</span>}
                   </div>
                 </CardContent>
               </Card>
@@ -2199,73 +3035,77 @@ export default function LogoDesignerPage() {
                   </div>
               ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {designHistory.map((design: LogoDesignData) => (
-                        <Card key={design.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                          <CardContent className="p-4">
-                            <div className="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden relative">
-                              {designThumbnails[design.id] ? (
-                                  <Image
-                                      src={designThumbnails[design.id] || "/placeholder.svg"}
-                                      alt={`Preview of ${design.name}`}
-                                      fill
-                                      className="object-cover"
-                                  />
-                              ) : (
-                                  <div className="w-full h-full flex items-center justify-center">
-                                    <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                    {designHistory
+                        .filter(
+                            (design: LogoDesignData) => Array.isArray(design.data?.elements) && !design.data?.selectedTemplate,
+                        )
+                        .map((design: LogoDesignData) => (
+                            <Card key={design.id} className="cursor-pointer hover:shadow-md transition-shadow">
+                              <CardContent className="p-4">
+                                <div className="aspect-square bg-gray-100 rounded-lg mb-3 overflow-hidden relative">
+                                  {designThumbnails[design.id] ? (
+                                      <Image
+                                          src={designThumbnails[design.id] || "/placeholder.svg"}
+                                          alt={`Preview of ${design.name}`}
+                                          fill
+                                          className="object-cover"
+                                      />
+                                  ) : (
+                                      <div className="w-full h-full flex items-center justify-center">
+                                        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                                      </div>
+                                  )}
+
+                                  {/* Canvas size badge */}
+                                  <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
+                                    {design.data.canvasSize.width}×{design.data.canvasSize.height}
                                   </div>
-                              )}
 
-                              {/* Canvas size badge */}
-                              <div className="absolute top-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded">
-                                {design.data.canvasSize.width}×{design.data.canvasSize.height}
-                              </div>
+                                  {/* Element count badge */}
+                                  {design.data.elements && design.data.elements.length > 0 && (
+                                      <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
+                                        {design.data.elements.length} element{design.data.elements.length !== 1 ? "s" : ""}
+                                      </div>
+                                  )}
+                                </div>
 
-                              {/* Element count badge */}
-                              {design.data.elements && design.data.elements.length > 0 && (
-                                  <div className="absolute top-2 right-2 bg-primary text-primary-foreground text-xs px-2 py-1 rounded">
-                                    {design.data.elements.length} element{design.data.elements.length !== 1 ? "s" : ""}
+                                <div className="space-y-2">
+                                  <h4 className="font-semibold truncate">{design.name}</h4>
+                                  <div className="text-xs text-gray-500 space-y-1">
+                                    <div className="flex items-center gap-1">
+                                      <Calendar className="h-3 w-3" />
+                                      Created: {new Date(design.createdAt).toLocaleDateString()}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" />
+                                      Updated: {new Date(design.updatedAt).toLocaleDateString()}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <Maximize2 className="h-3 w-3" />
+                                      {design.data.canvasSize?.width || 500} × {design.data.canvasSize?.height || 500}px
+                                    </div>
                                   </div>
-                              )}
-                            </div>
 
-                            <div className="space-y-2">
-                              <h4 className="font-semibold truncate">{design.name}</h4>
-                              <div className="text-xs text-gray-500 space-y-1">
-                                <div className="flex items-center gap-1">
-                                  <Calendar className="h-3 w-3" />
-                                  Created: {new Date(design.createdAt).toLocaleDateString()}
+                                  <div className="flex gap-2 pt-2">
+                                    <Button size="sm" onClick={() => loadDesign(design)} className="flex-1">
+                                      <FileText className="h-3 w-3 mr-1" />
+                                      Load
+                                    </Button>
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          deleteDesign(design.id)
+                                        }}
+                                    >
+                                      <Trash className="h-3 w-3" />
+                                    </Button>
+                                  </div>
                                 </div>
-                                <div className="flex items-center gap-1">
-                                  <Clock className="h-3 w-3" />
-                                  Updated: {new Date(design.updatedAt).toLocaleDateString()}
-                                </div>
-                                <div className="flex items-center gap-1">
-                                  <Maximize2 className="h-3 w-3" />
-                                  {design.data.canvasSize?.width || 500} × {design.data.canvasSize?.height || 500}px
-                                </div>
-                              </div>
-
-                              <div className="flex gap-2 pt-2">
-                                <Button size="sm" onClick={() => loadDesign(design)} className="flex-1">
-                                  <FileText className="h-3 w-3 mr-1" />
-                                  Load
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      deleteDesign(design.id)
-                                    }}
-                                >
-                                  <Trash className="h-3 w-3" />
-                                </Button>
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                    ))}
+                              </CardContent>
+                            </Card>
+                        ))}
                   </div>
               )}
 
