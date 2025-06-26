@@ -17,8 +17,6 @@ import {
   PanelRight,
   ImageIcon,
   Trash2,
-  SunMedium,
-  Contrast,
   Palette,
   Sparkles,
   Loader2,
@@ -39,10 +37,7 @@ import {
   MoreHorizontal,
   Clock,
   Save,
-  Trash,
-  Calendar,
-  FileText,
-  Package,
+  Package, Trash, FileText, Calendar, Contrast, SunMedium,
 } from "lucide-react"
 import { useIsMobile as useMobile } from "@/hooks/use-mobile"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -64,8 +59,8 @@ import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useAuth } from "@/lib/auth-context"
-import LoginModal from "@/components/login-modal"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import LoginModal from "@/components/login-modal";
 
 // Define logo data structure with enhanced properties
 interface LogoData {
@@ -190,7 +185,7 @@ export default function EditorPage() {
   const [showAuthModal, setShowAuthModal] = useState(false)
   const [showLoginModal, setShowLoginModal] = useState(false)
 
-  // Design History & Recent Projects
+// Design History & Recent Projects
   const [designHistory, setDesignHistory] = useState<DesignData[]>([])
   const [showHistoryModal, setShowHistoryModal] = useState(false)
   const [currentDesignName, setCurrentDesignName] = useState("")
@@ -204,12 +199,12 @@ export default function EditorPage() {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [hasShownInitialSavePrompt, setHasShownInitialSavePrompt] = useState(false)
 
-  // Template AI Generator
+// Template AI Generator
   const [templatePrompt, setTemplatePrompt] = useState("")
   const [isGeneratingTemplates, setIsGeneratingTemplates] = useState(false)
   const [generatedTemplates, setGeneratedTemplates] = useState<string[]>([])
 
-  // Template Layer
+// Template Layer
   const [templateLayer, setTemplateLayer] = useState<TemplateLayer>({
     id: "template-layer",
     name: "Template Background",
@@ -231,20 +226,20 @@ export default function EditorPage() {
   })
   const [selectedLayer, setSelectedLayer] = useState<"template" | number | null>(null)
 
-  // Add this near the top of the component with other refs
+// Add this near the top of the component with other refs
   const userRef = useRef(user)
 
-  // Add this useEffect to keep the ref updated
+// Add this useEffect to keep the ref updated
   useEffect(() => {
     userRef.current = user
   }, [user])
 
-  // Debug logging for auth state changes
+// Debug logging for auth state changes
   useEffect(() => {
     console.log("🎨 Editor - Auth state changed:", { user, loading })
   }, [user, loading])
 
-  // Check if user should see auth modal (but don't change layout)
+// Check if user should see auth modal (but don't change layout)
   useEffect(() => {
     console.log("🎨 Editor - Checking if should show modal:", { loading, user })
     if (!loading) {
@@ -258,16 +253,7 @@ export default function EditorPage() {
     }
   }, [user, loading])
 
-  // Template data mapping
-  // Replace this line:
-  // const templateImages: Record<string, string> = {
-  //   box: "/product-box.png??key=lkdoe",
-  //   cup: "/cup.png?key=7tclj",
-  //   bag: "/bag.jpg?key=yfvyb",
-  //   container: "/food-container.webp?key=pbzx5",
-  // }
 
-  // With this:
   const [templateImages, setTemplateImages] = useState<Record<string, string>>({
     box: "/product-box.png??key=lkdoe",
     cup: "/cup.png?key=7tclj",
@@ -275,15 +261,6 @@ export default function EditorPage() {
     container: "/food-container.webp?key=pbzx5",
   })
 
-  // Replace this line:
-  // const templateNames: Record<string, string> = {
-  //   box: "Product Box",
-  //   cup: "Coffee Cup",
-  //   bag: "Shopping Bag",
-  //   container: "Food Container",
-  // }
-
-  // With this:
   const [templateNames, setTemplateNames] = useState<Record<string, string>>({
     box: "Product Box",
     cup: "Coffee Cup",
@@ -291,10 +268,8 @@ export default function EditorPage() {
     container: "Food Container",
   })
 
-  // Get the currently selected logo
   const selectedLogo = selectedLogoIndex !== null ? logos[selectedLogoIndex] : null
 
-  // Create a new logo with enhanced properties
   const createNewLogo = (file: File | null = null, url: string | null = null): LogoData => {
     const newZIndex = Math.max(...logos.map((l) => l.zIndex), 0) + 1
     console.log("🎨 Creating new logo:", { file: file?.name, url, newZIndex })
@@ -303,7 +278,7 @@ export default function EditorPage() {
       id: Date.now().toString(),
       file,
       url,
-      originalUrl: url, // Store the original URL
+      originalUrl: url,
       position: { x: 50, y: 50 },
       size: 30,
       rotation: 0,
@@ -321,7 +296,7 @@ export default function EditorPage() {
     }
   }
 
-  // Add a new logo
+// Add a new logo
   const addLogo = (file: File | null = null, url: string | null = null) => {
     console.log("🎨 Adding logo:", { file: file?.name, url })
     const newLogo = createNewLogo(file, url)
@@ -340,7 +315,7 @@ export default function EditorPage() {
     })
   }
 
-  // Remove the selected logo
+// Remove the selected logo
   const removeLogo = () => {
     if (selectedLogoIndex === null) return
 
@@ -359,7 +334,7 @@ export default function EditorPage() {
     })
   }
 
-  // Layer management functions
+// Layer management functions
   const moveLayerUp = (index: number) => {
     const newLogos = [...logos]
     const currentZIndex = newLogos[index].zIndex
@@ -416,7 +391,7 @@ export default function EditorPage() {
     setLogos(newLogos)
   }
 
-  // Template layer functions
+// Template layer functions
   const toggleTemplateVisibility = () => {
     setTemplateLayer((prev) => ({ ...prev, visible: !prev.visible }))
   }
@@ -474,7 +449,7 @@ export default function EditorPage() {
     })
   }
 
-  // Alignment functions
+// Alignment functions
   const alignElements = (alignment: string) => {
     if (selectedLogos.length < 2) {
       toast({
@@ -552,7 +527,7 @@ export default function EditorPage() {
     })
   }
 
-  // Canvas resize function
+// Canvas resize function
   const resizeCanvas = () => {
     const preset = CANVAS_PRESETS[selectedPreset as keyof typeof CANVAS_PRESETS]
     const newSize = selectedPreset === "custom" ? customSize : { width: preset.width, height: preset.height }
@@ -581,7 +556,7 @@ export default function EditorPage() {
     })
   }
 
-  // Update logo URL when file changes - FIXED VERSION
+// Update logo URL when file changes - FIXED VERSION
   useEffect(() => {
     console.log("🎨 Logo URL effect triggered, logos count:", logos.length)
 
@@ -621,14 +596,11 @@ export default function EditorPage() {
       }
     })
 
-    // Cleanup function - only cleanup blob URLs that are no longer in use
     return () => {
-      // This cleanup will run when logos array changes or component unmounts
-      // We should be careful not to revoke URLs that are still being used
     }
   }, [logos.length]) // Only depend on logos.length to avoid infinite loops
 
-  // Enhanced file upload with backend storage - FIXED VERSION
+// Enhanced file upload with backend storage - FIXED VERSION
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     console.log("🎨 File upload triggered")
 
@@ -756,7 +728,162 @@ export default function EditorPage() {
     }
   }
 
-  // Enhanced drag and resize handlers
+// Enhanced template upload with backend storage
+  const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log("🎨 Template upload triggered")
+
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0]
+      console.log("🎨 Template file selected:", { name: file.name, size: file.size, type: file.type })
+
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        console.error("🎨 Invalid file type:", file.type)
+        toast({
+          title: "Invalid File Type",
+          description: "Please upload a PNG, JPG, or other image file.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validate file size (max 10MB)
+      if (file.size > 10 * 1024 * 1024) {
+        console.error("🎨 File too large:", file.size)
+        toast({
+          title: "File Too Large",
+          description: "Please upload an image smaller than 10MB.",
+          variant: "destructive",
+        })
+        return
+      }
+
+      if (!user) {
+        console.log("🎨 No user authenticated")
+        toast({
+          title: "Authentication Required",
+          description: "Please log in to upload templates.",
+          variant: "destructive",
+        })
+        setShowAuthModal(true)
+        return
+      }
+
+      setIsUploading(true)
+
+      try {
+        // Create form data
+        const formData = new FormData()
+        formData.append("image", file)
+        console.log("🎨 FormData created with template image")
+
+        // Upload to backend directly
+        const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
+        console.log("🎨 Using backend URL:", BACKEND_URL)
+        const uploadUrl = `${BACKEND_URL}/api/uploads/upload`
+
+        console.log("🎨 Uploading template to:", uploadUrl)
+
+        const response = await fetch(uploadUrl, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${getAuthToken()}`,
+          },
+          body: formData,
+        })
+
+        console.log("🎨 Template upload response status:", response.status)
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          console.error("🎨 Template upload failed:", errorData)
+          throw new Error(errorData.error || "Upload failed")
+        }
+
+        const uploadData = await response.json()
+        console.log("🎨 Template upload successful:", uploadData)
+
+        // Extract the correct URL from the response
+        let imageUrl = null
+        if (uploadData.data && uploadData.data.url) {
+          imageUrl = uploadData.data.url
+        } else if (uploadData.data && uploadData.data.fileUrl) {
+          imageUrl = uploadData.data.fileUrl
+        } else if (uploadData.url) {
+          imageUrl = uploadData.url
+        } else if (uploadData.fileUrl) {
+          imageUrl = uploadData.fileUrl
+        }
+
+        // Transform localhost URLs to use the correct backend URL
+        if (imageUrl && imageUrl.includes("localhost:3001")) {
+          imageUrl = imageUrl.replace("http://localhost:3001", BACKEND_URL)
+          console.log("🎨 Transformed localhost URL to:", imageUrl)
+        }
+
+        console.log("🎨 Final template image URL:", imageUrl)
+
+        if (!imageUrl) {
+          console.error("🎨 No URL found in template upload response:", uploadData)
+          throw new Error("No image URL returned from server")
+        }
+
+        // Add the uploaded template to available templates
+        const templateId = `custom-${Date.now()}`
+        const templateName = file.name.replace(/\.[^/.]+$/, "") // Remove file extension
+
+        setTemplateImages((prev) => ({
+          ...prev,
+          [templateId]: imageUrl,
+        }))
+
+        setTemplateNames((prev) => ({
+          ...prev,
+          [templateId]: templateName,
+        }))
+
+        // Automatically select the new template
+        setSelectedTemplate(templateId)
+        setHasUnsavedChanges(true)
+
+        // Load the image to get aspect ratio
+        const img = new window.Image()
+        img.crossOrigin = "anonymous"
+        img.onload = () => {
+          const aspectRatio = img.width / img.height
+          console.log("🎨 Custom template loaded with aspect ratio:", aspectRatio)
+          setTemplateLayer((prev) => ({
+            ...prev,
+            aspectRatio,
+          }))
+        }
+        img.onerror = (error) => {
+          console.error("🎨 Failed to load custom template image:", error)
+        }
+        img.src = imageUrl
+
+        toast({
+          title: "Template Uploaded!",
+          description: "Your custom template has been uploaded and applied to the canvas.",
+        })
+      } catch (error) {
+        console.error("🎨 Template upload error:", error)
+
+        toast({
+          title: "Upload Failed",
+          description: "There was an error uploading your template. Please try again.",
+          variant: "destructive",
+        })
+      } finally {
+        setIsUploading(false)
+      }
+
+      // Reset the input value so the same file can be selected again if needed
+      e.target.value = ""
+    }
+  }
+
+// Enhanced drag and resize handlers
   const handleDragStart = (e: React.MouseEvent | React.TouchEvent, logoIndex: number) => {
     if (logos[logoIndex].locked) return
 
@@ -912,7 +1039,7 @@ export default function EditorPage() {
     setResizeHandle(null)
   }
 
-  // Update logo properties
+// Update logo properties
   const updateLogoSize = (size: number) => {
     if (selectedLogoIndex === null) return
 
@@ -975,7 +1102,7 @@ export default function EditorPage() {
     setLogos(newLogos)
   }
 
-  // Reset logo position and settings
+// Reset logo position and settings
   const resetLogo = () => {
     if (selectedLogoIndex === null) return
 
@@ -1000,7 +1127,7 @@ export default function EditorPage() {
     })
   }
 
-  // Enhanced download function
+// Enhanced download function
   const handleDownload = () => {
     if (!containerRef.current) return
     if (!user) {
@@ -1172,7 +1299,7 @@ export default function EditorPage() {
     }
   }
 
-  // Handle canvas click for selection
+// Handle canvas click for selection
   const handleCanvasClick = (e: React.MouseEvent) => {
     if (!containerRef.current) return
 
@@ -1254,11 +1381,11 @@ export default function EditorPage() {
     }
   }
 
-  // Toggle panels
+// Toggle panels
   const toggleLeftPanel = () => setShowLeftPanel(!showLeftPanel)
   const toggleRightPanel = () => setShowRightPanel(!showRightPanel)
 
-  // Template AI generation
+// Template AI generation
   const addGeneratedTemplate = (url: string) => {
     console.log("🎨 Adding generated template:", url)
     // Add to template images with a unique ID
@@ -1443,7 +1570,7 @@ export default function EditorPage() {
     })
   }
 
-  // Set up event listeners
+// Set up event listeners
   useEffect(() => {
     window.addEventListener("mouseup", handleDragEnd)
     window.addEventListener("touchend", handleDragEnd)
@@ -1454,7 +1581,7 @@ export default function EditorPage() {
     }
   }, [])
 
-  // Load design history on component mount
+// Load design history on component mount
   useEffect(() => {
     window.addEventListener("mouseup", handleDragEnd)
     window.addEventListener("touchend", handleDragEnd)
@@ -1465,14 +1592,14 @@ export default function EditorPage() {
     }
   }, [])
 
-  // Load design history on component mount
+// Load design history on component mount
   useEffect(() => {
     if (user) {
       loadDesignHistory()
     }
   }, [user])
 
-  // Auto-save current design state every 30 seconds
+// Auto-save current design state every 30 seconds
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
       if (logos.length > 0 && user && currentDesignId) {
@@ -1484,17 +1611,17 @@ export default function EditorPage() {
     return () => clearInterval(autoSaveInterval)
   }, [logos, selectedTemplate, canvasSize, waxEffect, user, currentDesignId, currentDesignName])
 
-  // Get CSS filter string for a logo
+// Get CSS filter string for a logo
   const getLogoFilterStyle = (filters: LogoData["filters"]) => {
     return `brightness(${filters.brightness}%) contrast(${filters.contrast}%) hue-rotate(${filters.hue}deg) saturate(${filters.saturation}%)`
   }
 
-  // Get CSS filter string for template
+// Get CSS filter string for template
   const getTemplateFilterStyle = (filters: TemplateLayer["filters"]) => {
     return `brightness(${filters.brightness}%) contrast(${filters.contrast}%) hue-rotate(${filters.hue}deg) saturate(${filters.saturation}%)`
   }
 
-  // Render resize handles for selected logo
+// Render resize handles for selected logo
   const renderResizeHandles = (logo: LogoData, index: number) => {
     if (selectedLogoIndex !== index || logo.locked) return null
 
@@ -1549,7 +1676,7 @@ export default function EditorPage() {
     }, 300)
   }
 
-  // Design History Functions - FIXED VERSION
+// Design History Functions - FIXED VERSION
   const saveCurrentDesign = async (name?: string) => {
     if (!user) {
       toast({
@@ -1587,12 +1714,12 @@ export default function EditorPage() {
           waxEffect,
           templateColor,
           // Include template images and names for AI-generated templates
-          templateImages: selectedTemplate.startsWith("generated-")
+          templateImages: selectedTemplate.startsWith("generated-") || selectedTemplate.startsWith("custom-")
               ? {
                 [selectedTemplate]: templateImages[selectedTemplate],
               }
               : undefined,
-          templateNames: selectedTemplate.startsWith("generated-")
+          templateNames: selectedTemplate.startsWith("generated-") || selectedTemplate.startsWith("custom-")
               ? {
                 [selectedTemplate]: templateNames[selectedTemplate],
               }
@@ -1661,12 +1788,12 @@ export default function EditorPage() {
             canvasSize,
             waxEffect,
             templateColor,
-            templateImages: selectedTemplate.startsWith("generated-")
+            templateImages: selectedTemplate.startsWith("generated-") || selectedTemplate.startsWith("custom-")
                 ? {
                   [selectedTemplate]: templateImages[selectedTemplate],
                 }
                 : undefined,
-            templateNames: selectedTemplate.startsWith("generated-")
+            templateNames: selectedTemplate.startsWith("generated-") || selectedTemplate.startsWith("custom-")
                 ? {
                   [selectedTemplate]: templateNames[selectedTemplate],
                 }
@@ -1824,7 +1951,7 @@ export default function EditorPage() {
     }
   }
 
-  // Generate thumbnail for design preview
+// Generate thumbnail for design preview
   const generateDesignThumbnail = async (design: DesignData): Promise<string> => {
     return new Promise((resolve) => {
       const canvas = document.createElement("canvas")
@@ -1864,8 +1991,8 @@ export default function EditorPage() {
         }
 
         // If still not found and it's an AI-generated template, use placeholder
-        if (!templateImageUrl && design.data.selectedTemplate.startsWith("generated-")) {
-          templateImageUrl = "/placeholder.svg?height=400&width=400&text=AI+Template"
+        if (!templateImageUrl && (design.data.selectedTemplate.startsWith("generated-") || design.data.selectedTemplate.startsWith("custom-"))) {
+          templateImageUrl = "/placeholder.svg?height=400&width=400&text=Custom+Template"
         }
       }
 
@@ -2019,7 +2146,7 @@ export default function EditorPage() {
     }
   }
 
-  // Track unsaved changes and prompt for saving - FIXED VERSION
+// Track unsaved changes and prompt for saving - FIXED VERSION
   useEffect(() => {
     const hasChanges =
         logos.length > 0 || selectedTemplate !== "box" || canvasSize.width !== 800 || canvasSize.height !== 600
@@ -2064,7 +2191,7 @@ export default function EditorPage() {
     hasShownInitialSavePrompt,
   ])
 
-  // Debug effect to log logos state changes
+// Debug effect to log logos state changes
   useEffect(() => {
     console.log("🎨 Logos state changed:", {
       count: logos.length,
@@ -2258,6 +2385,39 @@ export default function EditorPage() {
                               <p className="text-xs text-center font-medium">{name}</p>
                             </div>
                         ))}
+                      </div>
+
+                      {/* Custom Template Upload */}
+                      <div className="border-t pt-4">
+                        <div className="space-y-2">
+                          <Label className="text-sm font-medium">Upload Custom Template</Label>
+                          <input
+                              type="file"
+                              id="template-upload"
+                              accept="image/*"
+                              onChange={handleTemplateUpload}
+                              className="hidden"
+                              disabled={isUploading}
+                          />
+                          <label htmlFor="template-upload">
+                            <Button variant="outline" className="w-full gap-2" asChild disabled={isUploading}>
+                        <span>
+                          {isUploading ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                              </>
+                          ) : (
+                              <>
+                                <Upload className="h-4 w-4" /> Upload Template
+                              </>
+                          )}
+                        </span>
+                            </Button>
+                          </label>
+                          <p className="text-xs text-gray-500">
+                            Upload your own template image to use as a mockup background
+                          </p>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -2649,17 +2809,17 @@ export default function EditorPage() {
                             />
                             <label htmlFor="welcome-upload">
                               <Button className="w-full gap-2" asChild disabled={isUploading}>
-                            <span>
-                              {isUploading ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
-                                  </>
-                              ) : (
-                                  <>
-                                    <Upload className="h-4 w-4" /> Upload Logo
-                                  </>
-                              )}
-                            </span>
+                          <span>
+                            {isUploading ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                                </>
+                            ) : (
+                                <>
+                                  <Upload className="h-4 w-4" /> Upload Logo
+                                </>
+                            )}
+                          </span>
                               </Button>
                             </label>
                             <Link href="/logo-designer">
@@ -2680,8 +2840,8 @@ export default function EditorPage() {
                     <div className="bg-white/90 backdrop-blur-sm rounded-lg p-3 text-sm text-gray-600 flex items-center gap-2">
                       <HelpCircle className="h-4 w-4" />
                       <span>
-                    Drag to move • Drag corners to resize • Ctrl+Click for multi-select • Right-click for options
-                  </span>
+                  Drag to move • Drag corners to resize • Ctrl+Click for multi-select • Right-click for options
+                </span>
                     </div>
                   </div>
               )}
@@ -2743,17 +2903,17 @@ export default function EditorPage() {
                                 />
                                 <label htmlFor="logo-upload-side">
                                   <Button variant="outline" className="w-full gap-2" asChild disabled={isUploading}>
-                                <span>
-                                  {isUploading ? (
-                                      <>
-                                        <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
-                                      </>
-                                  ) : (
-                                      <>
-                                        <Upload className="h-4 w-4" /> Upload New Logo
-                                      </>
-                                  )}
-                                </span>
+                              <span>
+                                {isUploading ? (
+                                    <>
+                                      <Loader2 className="h-4 w-4 animate-spin" /> Uploading...
+                                    </>
+                                ) : (
+                                    <>
+                                      <Upload className="h-4 w-4" /> Upload New Logo
+                                    </>
+                                )}
+                              </span>
                                   </Button>
                                 </label>
 
@@ -3016,7 +3176,6 @@ export default function EditorPage() {
                           </Card>
                         </AccordionContent>
                       </AccordionItem>
-
                       {/* Color Adjustments Accordion */}
                       <AccordionItem value="colors">
                         <AccordionTrigger className="text-base font-semibold">
