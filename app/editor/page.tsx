@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 import { useState, useRef, useEffect } from "react"
 import { useSearchParams } from "next/navigation"
 import Image from "next/image"
@@ -1127,7 +1127,6 @@ export default function EditorPage() {
     })
   }
 
-// Enhanced download function
   const handleDownload = () => {
     if (!containerRef.current) return
     if (!user) {
@@ -1602,14 +1601,13 @@ export default function EditorPage() {
 // Auto-save current design state every 30 seconds
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
-      if (logos.length > 0 && user && currentDesignId) {
-        // Only auto-save if we have an existing design
+      if (selectedTemplate.length > 0 && user && currentDesignId) {
         saveCurrentDesign(currentDesignName || "Auto-save")
       }
-    }, 30000) // 30 seconds
-
+    }, 10000)
+console.log("currentDesignId" , currentDesignId)
     return () => clearInterval(autoSaveInterval)
-  }, [logos, selectedTemplate, canvasSize, waxEffect, user, currentDesignId, currentDesignName])
+  }, [selectedTemplate, user, currentDesignId, currentDesignName])
 
 // Get CSS filter string for a logo
   const getLogoFilterStyle = (filters: LogoData["filters"]) => {
@@ -2145,12 +2143,18 @@ export default function EditorPage() {
       setDesignThumbnails(thumbnails)
     }
   }
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSaveDialog(true);
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, []);
 
 // Track unsaved changes and prompt for saving - FIXED VERSION
   useEffect(() => {
     const hasChanges =
-        logos.length > 0 || selectedTemplate !== "box" || canvasSize.width !== 800 || canvasSize.height !== 600
-
+        selectedTemplate.length > 0 || canvasSize.width !== 800 || canvasSize.height !== 600
     if (hasChanges && user) {
       setHasUnsavedChanges(true)
 
@@ -2185,26 +2189,13 @@ export default function EditorPage() {
     templateColor,
     waxEffect,
     templateLayer,
+    hasUnsavedChanges,
     user,
     currentDesignId,
     currentDesignName,
     hasShownInitialSavePrompt,
   ])
 
-// Debug effect to log logos state changes
-  useEffect(() => {
-    console.log("🎨 Logos state changed:", {
-      count: logos.length,
-      logos: logos.map((logo, index) => ({
-        index,
-        id: logo.id,
-        hasFile: !!logo.file,
-        hasUrl: !!logo.url,
-        url: logo.url,
-        visible: logo.visible,
-      })),
-    })
-  }, [logos])
 
   return (
       <div className="flex flex-col min-h-screen">
