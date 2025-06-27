@@ -63,7 +63,9 @@ import LoginModal from "@/components/login-modal"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import Image from "next/image"
 
-// Enhanced element interface for logo designer
+import JSZip from 'jszip'
+import { saveAs } from 'file-saver'
+import { Package, Archive } from 'lucide-react'
 interface DesignElement {
   id: string
   type: "shape" | "text" | "image"
@@ -74,12 +76,10 @@ interface DesignElement {
   locked: boolean
   visible: boolean
   maintainAspectRatio: boolean
-  // Shape-specific properties
   shapeType?: "rectangle" | "circle" | "triangle" | "star" | "heart" | "hexagon"
   fillColor?: string
   strokeColor?: string
   strokeWidth?: number
-  // Text-specific properties
   text?: string
   fontSize?: number
   fontFamily?: string
@@ -87,12 +87,9 @@ interface DesignElement {
   fontStyle?: string
   textAlign?: string
   textColor?: string
-  // Image-specific properties
   imageUrl?: string
   imageFile?: File
 }
-
-// Logo Design data structure for saving/loading
 interface LogoDesignData {
   id: string
   name: string
@@ -189,6 +186,149 @@ export default function LogoDesignerPage() {
   const [designThumbnails, setDesignThumbnails] = useState<Record<string, string>>({})
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
+// Add this state near your other state declarations
+  const [isGeneratingZip, setIsGeneratingZip] = useState(false)
+// Add this function to collect all assets and generate zip
+  const downloadAssetsAsZip = async () => {
+    if (!canvasRef.current) return
+
+    setIsGeneratingZip(true)
+
+    try {
+      const zip = new JSZip()
+
+      // Create folders
+      const assetsFolder = zip.folder("assets")
+      const exportFolder = zip.folder("exports")
+
+      // Get clean canvas without selections
+      const cleanCanvas = exportCleanCanvas()
+      if (cleanCanvas) {
+        const canvasDataUrl = cleanCanvas.toDataURL('image/png')
+        const canvasBlob = await fetch(canvasDataUrl).then(r => r.blob())
+        exportFolder?.file("design.png", canvasBlob)
+      }
+
+      // Rest of your existing code for assets...
+      const imageAssets = new Set<string>()
+      elements.forEach(element => {
+        if (element.type === 'image' && element.imageUrl) {
+          imageAssets.add(element.imageUrl)
+        }
+      })
+
+      // Add image assets to zip with proper extensions
+      let imageCounter = 1
+      for (const imageUrl of imageAssets) {
+        try {
+          const response = await fetch(imageUrl)
+          const blob = await response.blob()
+
+          let filename = imageUrl.split('/').pop() || `image_${imageCounter}`
+
+          if (!filename.includes('.')) {
+            const mimeType = blob.type
+            if (mimeType.includes('jpeg') || mimeType.includes('jpg')) {
+              filename += '.jpg'
+            } else if (mimeType.includes('svg')) {
+              filename += '.svg'
+            } else if (mimeType.includes('gif')) {
+              filename += '.gif'
+            } else if (mimeType.includes('webp')) {
+              filename += '.webp'
+            } else {
+              filename += '.png'
+            }
+          }
+
+          assetsFolder?.file(filename, blob)
+          imageCounter++
+        } catch (error) {
+          console.warn('Failed to fetch image:', imageUrl, error)
+        }
+      }
+
+      // Add design data as JSON
+      const designData = {
+        elements,
+        canvasSize,
+        metadata: {
+          name: currentDesignName || 'Untitled Design',
+          createdAt: new Date().toISOString(),
+          version: '1.0'
+        }
+      }
+
+      zip.file("design_data.json", JSON.stringify(designData, null, 2))
+
+      // Generate and download zip
+      const content = await zip.generateAsync({ type: "blob" })
+      const fileName = `${currentDesignName || 'logo_design'}_assets.zip`
+      saveAs(content, fileName)
+
+      toast({
+        title: "Assets Downloaded",
+        description: `All design assets have been packaged and downloaded as ${fileName}`,
+      })
+
+    } catch (error) {
+      console.error('Error generating zip:', error)
+      toast({
+        title: "Download Error",
+        description: "Failed to generate assets package. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsGeneratingZip(false)
+    }
+  }
+
+  const exportCleanCanvas = () => {
+    const canvas = canvasRef.current
+    if (!canvas) return null
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return null
+    // Create a temporary canvas for clean export
+    const tempCanvas = document.createElement('canvas')
+    const tempCtx = tempCanvas.getContext('2d')
+    if (!tempCtx) return null
+    tempCanvas.width = canvas.width
+    tempCanvas.height = canvas.height
+    // Clear with white background
+    tempCtx.fillStyle = "white"
+    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height)
+    // Draw only the elements without any selection indicators
+    const sortedElements = elements
+        .map((el, index) => ({ el, index }))
+        .filter(({ el }) => el.visible)
+        .sort((a, b) => a.el.zIndex - b.el.zIndex)
+    // Draw elements without selection
+    sortedElements.forEach(({ el }) => {
+      drawElementClean(tempCtx, el)
+    })
+    return tempCanvas
+  }
+// Add this helper function to draw elements without selection indicators:
+  const drawElementClean = (ctx: CanvasRenderingContext2D, element: DesignElement) => {
+    ctx.save()
+    // Apply transformations
+    ctx.translate(element.position.x + element.size.width / 2, element.position.y + element.size.height / 2)
+    ctx.rotate((element.rotation * Math.PI) / 180)
+    ctx.translate(-element.size.width / 2, -element.size.height / 2)
+    // Draw based on element type (same as your existing drawElement but without selection)
+    switch (element.type) {
+      case "shape":
+        drawShape(ctx, element)
+        break
+      case "text":
+        drawText(ctx, element)
+        break
+      case "image":
+        drawImage(ctx, element)
+        break
+    }
+    ctx.restore()
+  }
   // Text input state
   const [textInput, setTextInput] = useState("")
   const [textStyle, setTextStyle] = useState({
@@ -2070,7 +2210,6 @@ export default function LogoDesignerPage() {
           return
         }
 
-        // Handle element resizing
         if (isResizing && resizeHandle && selectedElementIndex !== null) {
           const element = elements[selectedElementIndex]
           const deltaX = coords.x - initialMousePos.x
@@ -2082,7 +2221,6 @@ export default function LogoDesignerPage() {
           let newX = element.position.x
           let newY = element.position.y
 
-          // Handle different resize directions
           if (resizeHandle.includes("e")) {
             newWidth = Math.max(20, element.size.width + deltaX)
           }
@@ -2100,11 +2238,9 @@ export default function LogoDesignerPage() {
             newY = element.position.y + heightChange
           }
 
-          // Maintain aspect ratio if enabled
           if (element.maintainAspectRatio) {
             const aspectRatio = element.size.width / element.size.height
 
-            // For corner handles, maintain aspect ratio
             if (resizeHandle === "se" || resizeHandle === "nw" || resizeHandle === "ne" || resizeHandle === "sw") {
               if (Math.abs(deltaX) > Math.abs(deltaY)) {
                 newHeight = newWidth / aspectRatio
@@ -2129,7 +2265,6 @@ export default function LogoDesignerPage() {
           return
         }
 
-        // Handle element dragging
         if (isDragging && selectedElementIndex !== null) {
           const element = elements[selectedElementIndex]
 
@@ -2138,13 +2273,11 @@ export default function LogoDesignerPage() {
             let newX = coords.x - dragOffset.x
             let newY = coords.y - dragOffset.y
 
-            // Snap to grid if enabled
             if (snapToGrid) {
               newX = Math.round(newX / gridSize) * gridSize
               newY = Math.round(newY / gridSize) * gridSize
             }
 
-            // Keep within canvas bounds
             newX = Math.max(0, Math.min(newX, canvasSize.width - element.size.width))
             newY = Math.max(0, Math.min(newY, canvasSize.height - element.size.height))
 
@@ -2192,7 +2325,6 @@ export default function LogoDesignerPage() {
     canvasSize,
   ])
 
-  // Always render the full layout - authentication is handled via modal only
   return (
       <div className="flex flex-col min-h-screen">
         <header className="border-b p-4 bg-white">
@@ -2321,9 +2453,39 @@ export default function LogoDesignerPage() {
                 )}
               </Button>
 
-              <Button onClick={downloadLogo} className="gap-2">
-                <Download className="h-4 w-4" /> Download Logo
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="gap-2">
+                    <Download className="w-4 h-4" />
+                    Download
+                    <ChevronDown className="w-3 h-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => {
+                    const cleanCanvas = exportCleanCanvas()
+                    if (!cleanCanvas) return
+                    const link = document.createElement('a')
+                    link.download = `${currentDesignName || 'logo'}.png`
+                    link.href = cleanCanvas.toDataURL()
+                    link.click()
+                  }}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Download PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                      onClick={downloadAssetsAsZip}
+                      disabled={isGeneratingZip}
+                  >
+                    {isGeneratingZip ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                        <Archive className="w-4 h-4 mr-2" />
+                    )}
+                    Download Bandkit
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </header>

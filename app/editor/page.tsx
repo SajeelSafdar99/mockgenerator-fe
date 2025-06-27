@@ -37,7 +37,7 @@ import {
   MoreHorizontal,
   Clock,
   Save,
-  Package, Trash, FileText, Calendar, Contrast, SunMedium,
+  Package, Trash, FileText, Calendar, Contrast, SunMedium, Archive,
 } from "lucide-react"
 import { useIsMobile as useMobile } from "@/hooks/use-mobile"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -61,13 +61,14 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useAuth } from "@/lib/auth-context"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import LoginModal from "@/components/login-modal";
+import JSZip from 'jszip';
 
 // Define logo data structure with enhanced properties
 interface LogoData {
   id: string
   file: File | null
   url: string | null
-  originalUrl?: string // Store the original URL for AI-generated logos
+  originalUrl?: string
   position: { x: number; y: number }
   size: number
   rotation: number
@@ -84,7 +85,6 @@ interface LogoData {
   }
 }
 
-// Template layer data structure
 interface TemplateLayer {
   id: string
   name: string
@@ -163,6 +163,7 @@ export default function EditorPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedLogos, setGeneratedLogos] = useState<string[]>([])
   const [isDownloading, setIsDownloading] = useState(false)
+  const [isDownloadingZip, setIsDownloadingZip] = useState(false)
   const [showWelcome, setShowWelcome] = useState(true)
   const [showResizeDialog, setShowResizeDialog] = useState(false)
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
@@ -1127,179 +1128,6 @@ export default function EditorPage() {
     })
   }
 
-  // const handleDownload = () => {
-  //   if (!containerRef.current) return
-  //   if (!user) {
-  //     setShowLoginModal(true)
-  //     return
-  //   }
-  //   setIsDownloading(true)
-  //
-  //   try {
-  //     const canvas = document.createElement("canvas")
-  //     const ctx = canvas.getContext("2d")
-  //
-  //     if (!ctx) {
-  //       setIsDownloading(false)
-  //       toast({
-  //         title: "Error",
-  //         description: "Could not create canvas context for download",
-  //         variant: "destructive",
-  //       })
-  //       return
-  //     }
-  //
-  //     canvas.width = canvasSize.width
-  //     canvas.height = canvasSize.height
-  //
-  //     // Draw white background
-  //     ctx.fillStyle = "white"
-  //     ctx.fillRect(0, 0, canvas.width, canvas.height)
-  //
-  //     // Draw wax effect if enabled
-  //     if (waxEffect.enabled && logos.length > 0) {
-  //       const firstLogo = logos.find((l) => l.url)
-  //       if (firstLogo?.url) {
-  //         const waxImg = new window.Image()
-  //         waxImg.crossOrigin = "anonymous"
-  //         waxImg.onload = () => {
-  //           ctx.save()
-  //           ctx.globalAlpha = waxEffect.opacity
-  //           ctx.globalCompositeOperation = "multiply"
-  //
-  //           // Create pattern
-  //           const patternCanvas = document.createElement("canvas")
-  //           const patternCtx = patternCanvas.getContext("2d")
-  //           if (patternCtx) {
-  //             patternCanvas.width = waxEffect.size
-  //             patternCanvas.height = waxEffect.size
-  //
-  //             // Draw logo in pattern canvas
-  //             patternCtx.filter = "grayscale(100%) brightness(150%)"
-  //             patternCtx.drawImage(waxImg, 0, 0, waxEffect.size, waxEffect.size)
-  //
-  //             // Create pattern and fill
-  //             const pattern = ctx.createPattern(patternCanvas, "repeat")
-  //             if (pattern) {
-  //               ctx.save()
-  //               ctx.translate(canvas.width / 2, canvas.height / 2)
-  //               ctx.rotate((waxEffect.rotation * Math.PI) / 180)
-  //               ctx.translate(-canvas.width / 2, -canvas.height / 2)
-  //               ctx.fillStyle = pattern
-  //               ctx.fillRect(0, 0, canvas.width, canvas.height)
-  //               ctx.restore()
-  //             }
-  //           }
-  //
-  //           ctx.restore()
-  //           // Continue with main rendering
-  //           renderMainContent()
-  //         }
-  //         waxImg.src = firstLogo.url
-  //       }
-  //       else{
-  //         renderMainContent()
-  //       }
-  //     } else {
-  //       renderMainContent()
-  //     }
-  //
-  //     function renderMainContent() {
-  //       // Draw template
-  //       const templateImg = new window.Image()
-  //       templateImg.crossOrigin = "anonymous"
-  //       templateImg.src = templateImages[selectedTemplate]
-  //
-  //       templateImg.onload = () => {
-  //         if (templateLayer.visible) {
-  //           ctx.save()
-  //           ctx.filter = getTemplateFilterStyle(templateLayer.filters)
-  //           ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
-  //           ctx.restore()
-  //         }
-  //
-  //         // Sort logos by z-index and render visible ones
-  //         const sortedLogos = logos
-  //             .map((logo, index) => ({ logo, index }))
-  //             .filter(({ logo }) => logo.visible && logo.url)
-  //             .sort((a, b) => a.logo.zIndex - b.logo.zIndex)
-  //
-  //         let processedLogos = 0
-  //
-  //         if (sortedLogos.length === 0) {
-  //           finishDownload()
-  //           return
-  //         }
-  //
-  //         sortedLogos.forEach(({ logo }) => {
-  //           const img = new window.Image()
-  //           img.crossOrigin = "anonymous"
-  //           img.onload = () => {
-  //             const x = (canvas.width * logo.position.x) / 100
-  //             const y = (canvas.height * logo.position.y) / 100
-  //             const size = (canvas.width * logo.size) / 100
-  //             const width = logo.maintainAspectRatio ? size : size
-  //             const height = logo.maintainAspectRatio ? size / logo.aspectRatio : size
-  //
-  //             ctx.save()
-  //             ctx.translate(x, y)
-  //             ctx.rotate((logo.rotation * Math.PI) / 180)
-  //             ctx.filter = getLogoFilterStyle(logo.filters)
-  //             ctx.drawImage(img, -width / 2, -height / 2, width, height)
-  //             ctx.restore()
-  //
-  //             processedLogos++
-  //             if (processedLogos === sortedLogos.length) {
-  //               finishDownload()
-  //             }
-  //           }
-  //           img.src = logo.url!
-  //         })
-  //       }
-  //
-  //       templateImg.onerror = () => {
-  //         toast({
-  //           title: "Error",
-  //           description: "Failed to load template image",
-  //           variant: "destructive",
-  //         })
-  //         setIsDownloading(false)
-  //       }
-  //     }
-  //
-  //     function finishDownload() {
-  //       try {
-  //         const dataUrl = canvas.toDataURL("image/png", 1.0)
-  //         const link = document.createElement("a")
-  //         link.download = `mockup-${selectedTemplate}-${Date.now()}.png`
-  //         link.href = dataUrl
-  //         link.click()
-  //
-  //         toast({
-  //           title: "Download Complete!",
-  //           description: "Your high-quality mockup has been downloaded successfully.",
-  //         })
-  //       } catch (error) {
-  //         console.error("Error creating download:", error)
-  //         toast({
-  //           title: "Error",
-  //           description: "Failed to create download file",
-  //           variant: "destructive",
-  //         })
-  //       } finally {
-  //         setIsDownloading(false)
-  //       }
-  //     }
-  //   } catch (error) {
-  //     console.error("Error in download process:", error)
-  //     toast({
-  //       title: "Error",
-  //       description: "There was an error generating your download",
-  //       variant: "destructive",
-  //     })
-  //     setIsDownloading(false)
-  //   }
-  // }
   const handleDownload = () => {
     if (!containerRef.current) return
     if (!user) {
@@ -1490,6 +1318,197 @@ export default function EditorPage() {
       })
       setIsDownloading(false)
     }
+  }
+
+  // Handle zip download with all assets
+  const handleZipDownload = async () => {
+    if (!containerRef.current) return
+    if (!user) {
+      setShowLoginModal(true)
+      return
+    }
+
+    setIsDownloadingZip(true)
+
+    try {
+      const zip = new JSZip()
+      const assetsFolder = zip.folder("assets")
+
+      // Function to fetch file as blob
+      const fetchAsBlob = async (url: string): Promise<Blob> => {
+        const response = await fetch(url)
+        if (!response.ok) throw new Error(`Failed to fetch ${url}`)
+        return response.blob()
+      }
+
+      // Add template image to assets
+      if (templateImages[selectedTemplate]) {
+        try {
+          const templateBlob = await fetchAsBlob(templateImages[selectedTemplate])
+          assetsFolder?.file(`template-${selectedTemplate}.png`, templateBlob)
+        } catch (error) {
+          console.warn("Could not add template to zip:", error)
+        }
+      }
+
+      // Add all logo files to assets
+      for (let i = 0; i < logos.length; i++) {
+        const logo = logos[i]
+        if (logo.url && logo.visible) {
+          try {
+            const logoBlob = await fetchAsBlob(logo.url)
+            const extension = logo.file?.type.includes('png') ? 'png' : 'jpg'
+            assetsFolder?.file(`logo-${i + 1}.${extension}`, logoBlob)
+          } catch (error) {
+            console.warn(`Could not add logo ${i + 1} to zip:`, error)
+          }
+        }
+      }
+
+      // Generate the final design image
+      const canvas = document.createElement("canvas")
+      const ctx = canvas.getContext("2d")
+
+      if (!ctx) {
+        throw new Error("Could not create canvas context")
+      }
+
+      // Set canvas size
+      canvas.width = canvasSize.width
+      canvas.height = canvasSize.height
+
+      // Fill with background color
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+      // Render template
+      if (templateImages[selectedTemplate] && templateLayer.visible) {
+        await new Promise<void>((resolve, reject) => {
+          const templateImg = new window.Image()
+          templateImg.crossOrigin = "anonymous"
+          templateImg.onload = () => {
+            ctx.save()
+
+            const centerX = (canvas.width * templateLayer.position.x) / 100
+            const centerY = (canvas.height * templateLayer.position.y) / 100
+            const width = (canvas.width * templateLayer.size) / 100
+            const height = templateLayer.maintainAspectRatio ? width / templateLayer.aspectRatio : (canvas.height * templateLayer.size) / 100
+
+            ctx.translate(centerX, centerY)
+            ctx.rotate((templateLayer.rotation * Math.PI) / 180)
+
+            // Apply filters
+            ctx.filter = getTemplateFilterStyle(templateLayer.filters)
+            ctx.drawImage(templateImg, -width / 2, -height / 2, width, height)
+            ctx.restore()
+            resolve()
+          }
+          templateImg.onerror = () => reject(new Error("Failed to load template"))
+          templateImg.src = templateImages[selectedTemplate]
+        })
+      }
+
+      // Render logos in z-index order
+      const sortedLogos = logos
+          .map((logo, index) => ({ logo, index }))
+          .filter(({ logo }) => logo.visible && logo.url)
+          .sort((a, b) => a.logo.zIndex - b.logo.zIndex)
+
+      for (const { logo } of sortedLogos) {
+        await new Promise<void>((resolve, reject) => {
+          const logoImg = new window.Image()
+          logoImg.crossOrigin = "anonymous"
+          logoImg.onload = () => {
+            ctx.save()
+
+            const centerX = (canvas.width * logo.position.x) / 100
+            const centerY = (canvas.height * logo.position.y) / 100
+            const width = (canvas.width * logo.size) / 100
+            const height = logo.maintainAspectRatio ? width / logo.aspectRatio : (canvas.height * logo.size) / 100
+
+            ctx.translate(centerX, centerY)
+            ctx.rotate((logo.rotation * Math.PI) / 180)
+
+            // Apply filters
+            ctx.filter = getLogoFilterStyle(logo.filters)
+            ctx.drawImage(logoImg, -width / 2, -height / 2, width, height)
+            ctx.restore()
+            resolve()
+          }
+          logoImg.onerror = () => reject(new Error("Failed to load logo"))
+          logoImg.src = logo.url!
+        })
+      }
+
+      // Add wax effect if enabled
+      if (waxEffect.enabled) {
+        drawWaxEffectOnCanvas(ctx, canvas.width, canvas.height)
+      }
+
+      // Convert canvas to blob and add to zip
+      const designBlob = await new Promise<Blob>((resolve) => {
+        canvas.toBlob((blob) => {
+          resolve(blob!)
+        }, 'image/png', 1.0)
+      })
+
+      zip.file(`design-${selectedTemplate}-${Date.now()}.png`, designBlob)
+
+      // Create design info file
+      const designInfo = {
+        designName: `Mockup Design - ${selectedTemplate}`,
+        createdAt: new Date().toISOString(),
+        template: selectedTemplate,
+        canvasSize: canvasSize,
+        logoCount: logos.filter(l => l.visible).length,
+        waxEffectEnabled: waxEffect.enabled,
+        assets: {
+          template: templateImages[selectedTemplate] ? `template-${selectedTemplate}.png` : null,
+          logos: logos.filter(l => l.visible).map((_, i) => `logo-${i + 1}.png`)
+        }
+      }
+
+      zip.file("design-info.json", JSON.stringify(designInfo, null, 2))
+
+      // Generate and download zip
+      const zipBlob = await zip.generateAsync({ type: "blob" })
+      const link = document.createElement("a")
+      link.download = `mockup-design-${selectedTemplate}-${Date.now()}.zip`
+      link.href = URL.createObjectURL(zipBlob)
+      link.click()
+
+      toast({
+        title: "Zip Download Complete!",
+        description: "Your design and all assets have been packaged and downloaded.",
+      })
+
+    } catch (error) {
+      console.error("Error creating zip download:", error)
+      toast({
+        title: "Error",
+        description: "Failed to create zip package. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDownloadingZip(false)
+    }
+  }
+
+  // Helper function to draw wax effect on canvas
+  const drawWaxEffectOnCanvas = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    ctx.save()
+    ctx.globalCompositeOperation = 'multiply'
+    ctx.globalAlpha = waxEffect.opacity / 100
+
+    // Create gradient for wax effect
+    const gradient = ctx.createLinearGradient(0, 0, width, height)
+    gradient.addColorStop(0, `${waxEffect.color}88`)
+    gradient.addColorStop(0.5, `${waxEffect.color}44`)
+    gradient.addColorStop(1, `${waxEffect.color}66`)
+
+    ctx.fillStyle = gradient
+    ctx.fillRect(0, 0, width, height)
+    ctx.restore()
   }
 
 // Handle canvas click for selection
@@ -2564,17 +2583,31 @@ export default function EditorPage() {
                   <Palette className="h-4 w-4" /> Logo Designer
                 </Button>
               </Link>
-              <Button onClick={handleDownload} className="gap-2" disabled={isDownloading || logos.length === 0}>
-                {isDownloading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
-                    </>
-                ) : (
-                    <>
-                      <Download className="h-4 w-4" /> Download
-                    </>
-                )}
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="gap-2" disabled={(isDownloading || isDownloadingZip) || logos.length === 0}>
+                    {(isDownloading || isDownloadingZip) ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" /> Preparing...
+                        </>
+                    ) : (
+                        <>
+                          <Download className="h-4 w-4" /> Download
+                        </>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleDownload} disabled={isDownloading || logos.length === 0}>
+                    <Download className="h-4 w-4 mr-2" />
+                    Download PNG
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleZipDownload} disabled={isDownloadingZip || logos.length === 0}>
+                    <Archive className="h-4 w-4 mr-2" />
+                    Download Bandkit
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="outline" size="icon" onClick={toggleRightPanel}>
                 <PanelRight className="h-4 w-4" />
               </Button>
