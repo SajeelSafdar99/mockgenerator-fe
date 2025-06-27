@@ -204,6 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     router.push("/editor")
                 } else {
                     console.log("✅ Signup complete, staying on current page")
+                    router.push("/")
                 }
             } else {
                 console.log("❌ Signup failed:", data.message)
