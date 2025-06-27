@@ -3117,7 +3117,7 @@ export default function EditorPage() {
             {showRightPanel && (
                 <div className="h-full max-h-[calc(100vh-200px)] overflow-y-auto transition-all duration-300">
                   <div className="space-y-2 pr-2">
-                    <Accordion type="multiple" defaultValue={["logos", "layers"]} className="w-full">
+                    <Accordion type="multiple" defaultValue={["logos", "layers", "template-settings"]} className="w-full">
                       {/* Logo Management Accordion */}
                       <AccordionItem value="logos">
                         <AccordionTrigger className="text-base font-semibold">
@@ -3442,12 +3442,104 @@ export default function EditorPage() {
                           </Card>
                         </AccordionContent>
                       </AccordionItem>
-                      {/* Color Adjustments Accordion */}
+                      {/* Template Settings Accordion */}
+                      {selectedLayer === "template" && (
+                          <AccordionItem value="template-settings">
+                            <AccordionTrigger className="text-base font-semibold">
+                              <div className="flex items-center gap-2">
+                                <Package className="h-5 w-5" />
+                                Template Settings
+                              </div>
+                            </AccordionTrigger>
+                            <AccordionContent className="space-y-4">
+                              <Card>
+                                <CardContent className="p-4 space-y-4">
+                                  <div className="relative w-full aspect-video border rounded-lg mb-2 overflow-hidden">
+                                    <Image
+                                        src={templateImages[selectedTemplate] || "/placeholder.svg"}
+                                        alt="Selected template"
+                                        fill
+                                        className="object-contain"
+                                        style={{ filter: getTemplateFilterStyle(templateLayer.filters) }}
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm">Size</span>
+                                      <div className="flex items-center gap-2">
+                                        <ZoomIn className="h-4 w-4 text-gray-500" />
+                                        <span className="text-sm">{templateLayer.size}%</span>
+                                      </div>
+                                    </div>
+                                    <Slider
+                                        value={[templateLayer.size]}
+                                        min={10}
+                                        max={150}
+                                        step={1}
+                                        onValueChange={(value) => updateTemplateSize(value[0])}
+                                    />
+                                  </div>
+
+                                  <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm">Rotation</span>
+                                      <span className="text-sm">{templateLayer.rotation}°</span>
+                                    </div>
+                                    <Slider
+                                        value={[templateLayer.rotation]}
+                                        min={0}
+                                        max={360}
+                                        step={1}
+                                        onValueChange={(value) => updateTemplateRotation(value[0])}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center space-x-2">
+                                    <Switch
+                                        id="template-maintain-aspect"
+                                        checked={templateLayer.maintainAspectRatio}
+                                        onCheckedChange={toggleTemplateMaintainAspectRatio}
+                                    />
+                                    <Label htmlFor="template-maintain-aspect">Maintain aspect ratio</Label>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2">
+                                    <div className="space-y-1">
+                                      <Label htmlFor="template-position-x">X Position</Label>
+                                      <Input
+                                          id="template-position-x"
+                                          type="number"
+                                          value={Math.round(templateLayer.position.x)}
+                                          onChange={(e) => updateTemplatePosition(Number(e.target.value), templateLayer.position.y)}
+                                          min={0}
+                                          max={100}
+                                      />
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label htmlFor="template-position-y">Y Position</Label>
+                                      <Input
+                                          id="template-position-y"
+                                          type="number"
+                                          value={Math.round(templateLayer.position.y)}
+                                          onChange={(e) => updateTemplatePosition(templateLayer.position.x, Number(e.target.value))}
+                                          min={0}
+                                          max={100}
+                                      />
+                                    </div>
+                                  </div>
+                                </CardContent>
+                              </Card>
+                            </AccordionContent>
+                          </AccordionItem>
+                      )}
+
+                      {/* Color & Filter Adjustments Accordion */}
                       <AccordionItem value="colors">
                         <AccordionTrigger className="text-base font-semibold">
                           <div className="flex items-center gap-2">
                             <Palette className="h-5 w-5" />
-                            Color Adjustments
+                            Color & Filter Adjustments
                           </div>
                         </AccordionTrigger>
                         <AccordionContent className="space-y-4">
