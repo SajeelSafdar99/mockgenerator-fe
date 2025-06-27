@@ -2204,7 +2204,7 @@ export default function LogoDesignerPage() {
                 </Button>
               </Link>
               <div>
-                <h1 className="text-xl font-bold">Logo Designer</h1>
+                <h1 className="text-xl font-bold">Vector Logo Designer</h1>
                 <p className="text-sm text-gray-500">Create custom logos with shapes, text, and images</p>
               </div>
             </div>

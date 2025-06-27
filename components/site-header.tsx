@@ -32,7 +32,7 @@ export default function SiteHeader() {
     const navItems = [
         { name: "Home", path: "/" },
         { name: "Editor", path: "/editor" },
-        { name: "Logo Designer", path: "/logo-designer" },
+        { name: "Vector Logo Designer", path: "/logo-designer" },
         { name: "Wax Paper", path: "/wax-paper" },
     ]
 

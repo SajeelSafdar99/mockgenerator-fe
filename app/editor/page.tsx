@@ -1127,6 +1127,179 @@ export default function EditorPage() {
     })
   }
 
+  // const handleDownload = () => {
+  //   if (!containerRef.current) return
+  //   if (!user) {
+  //     setShowLoginModal(true)
+  //     return
+  //   }
+  //   setIsDownloading(true)
+  //
+  //   try {
+  //     const canvas = document.createElement("canvas")
+  //     const ctx = canvas.getContext("2d")
+  //
+  //     if (!ctx) {
+  //       setIsDownloading(false)
+  //       toast({
+  //         title: "Error",
+  //         description: "Could not create canvas context for download",
+  //         variant: "destructive",
+  //       })
+  //       return
+  //     }
+  //
+  //     canvas.width = canvasSize.width
+  //     canvas.height = canvasSize.height
+  //
+  //     // Draw white background
+  //     ctx.fillStyle = "white"
+  //     ctx.fillRect(0, 0, canvas.width, canvas.height)
+  //
+  //     // Draw wax effect if enabled
+  //     if (waxEffect.enabled && logos.length > 0) {
+  //       const firstLogo = logos.find((l) => l.url)
+  //       if (firstLogo?.url) {
+  //         const waxImg = new window.Image()
+  //         waxImg.crossOrigin = "anonymous"
+  //         waxImg.onload = () => {
+  //           ctx.save()
+  //           ctx.globalAlpha = waxEffect.opacity
+  //           ctx.globalCompositeOperation = "multiply"
+  //
+  //           // Create pattern
+  //           const patternCanvas = document.createElement("canvas")
+  //           const patternCtx = patternCanvas.getContext("2d")
+  //           if (patternCtx) {
+  //             patternCanvas.width = waxEffect.size
+  //             patternCanvas.height = waxEffect.size
+  //
+  //             // Draw logo in pattern canvas
+  //             patternCtx.filter = "grayscale(100%) brightness(150%)"
+  //             patternCtx.drawImage(waxImg, 0, 0, waxEffect.size, waxEffect.size)
+  //
+  //             // Create pattern and fill
+  //             const pattern = ctx.createPattern(patternCanvas, "repeat")
+  //             if (pattern) {
+  //               ctx.save()
+  //               ctx.translate(canvas.width / 2, canvas.height / 2)
+  //               ctx.rotate((waxEffect.rotation * Math.PI) / 180)
+  //               ctx.translate(-canvas.width / 2, -canvas.height / 2)
+  //               ctx.fillStyle = pattern
+  //               ctx.fillRect(0, 0, canvas.width, canvas.height)
+  //               ctx.restore()
+  //             }
+  //           }
+  //
+  //           ctx.restore()
+  //           // Continue with main rendering
+  //           renderMainContent()
+  //         }
+  //         waxImg.src = firstLogo.url
+  //       }
+  //       else{
+  //         renderMainContent()
+  //       }
+  //     } else {
+  //       renderMainContent()
+  //     }
+  //
+  //     function renderMainContent() {
+  //       // Draw template
+  //       const templateImg = new window.Image()
+  //       templateImg.crossOrigin = "anonymous"
+  //       templateImg.src = templateImages[selectedTemplate]
+  //
+  //       templateImg.onload = () => {
+  //         if (templateLayer.visible) {
+  //           ctx.save()
+  //           ctx.filter = getTemplateFilterStyle(templateLayer.filters)
+  //           ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
+  //           ctx.restore()
+  //         }
+  //
+  //         // Sort logos by z-index and render visible ones
+  //         const sortedLogos = logos
+  //             .map((logo, index) => ({ logo, index }))
+  //             .filter(({ logo }) => logo.visible && logo.url)
+  //             .sort((a, b) => a.logo.zIndex - b.logo.zIndex)
+  //
+  //         let processedLogos = 0
+  //
+  //         if (sortedLogos.length === 0) {
+  //           finishDownload()
+  //           return
+  //         }
+  //
+  //         sortedLogos.forEach(({ logo }) => {
+  //           const img = new window.Image()
+  //           img.crossOrigin = "anonymous"
+  //           img.onload = () => {
+  //             const x = (canvas.width * logo.position.x) / 100
+  //             const y = (canvas.height * logo.position.y) / 100
+  //             const size = (canvas.width * logo.size) / 100
+  //             const width = logo.maintainAspectRatio ? size : size
+  //             const height = logo.maintainAspectRatio ? size / logo.aspectRatio : size
+  //
+  //             ctx.save()
+  //             ctx.translate(x, y)
+  //             ctx.rotate((logo.rotation * Math.PI) / 180)
+  //             ctx.filter = getLogoFilterStyle(logo.filters)
+  //             ctx.drawImage(img, -width / 2, -height / 2, width, height)
+  //             ctx.restore()
+  //
+  //             processedLogos++
+  //             if (processedLogos === sortedLogos.length) {
+  //               finishDownload()
+  //             }
+  //           }
+  //           img.src = logo.url!
+  //         })
+  //       }
+  //
+  //       templateImg.onerror = () => {
+  //         toast({
+  //           title: "Error",
+  //           description: "Failed to load template image",
+  //           variant: "destructive",
+  //         })
+  //         setIsDownloading(false)
+  //       }
+  //     }
+  //
+  //     function finishDownload() {
+  //       try {
+  //         const dataUrl = canvas.toDataURL("image/png", 1.0)
+  //         const link = document.createElement("a")
+  //         link.download = `mockup-${selectedTemplate}-${Date.now()}.png`
+  //         link.href = dataUrl
+  //         link.click()
+  //
+  //         toast({
+  //           title: "Download Complete!",
+  //           description: "Your high-quality mockup has been downloaded successfully.",
+  //         })
+  //       } catch (error) {
+  //         console.error("Error creating download:", error)
+  //         toast({
+  //           title: "Error",
+  //           description: "Failed to create download file",
+  //           variant: "destructive",
+  //         })
+  //       } finally {
+  //         setIsDownloading(false)
+  //       }
+  //     }
+  //   } catch (error) {
+  //     console.error("Error in download process:", error)
+  //     toast({
+  //       title: "Error",
+  //       description: "There was an error generating your download",
+  //       variant: "destructive",
+  //     })
+  //     setIsDownloading(false)
+  //   }
+  // }
   const handleDownload = () => {
     if (!containerRef.current) return
     if (!user) {
@@ -1156,50 +1329,8 @@ export default function EditorPage() {
       ctx.fillStyle = "white"
       ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-      // Draw wax effect if enabled
-      if (waxEffect.enabled && logos.length > 0) {
-        const firstLogo = logos.find((l) => l.url)
-        if (firstLogo?.url) {
-          const waxImg = new window.Image()
-          waxImg.crossOrigin = "anonymous"
-          waxImg.onload = () => {
-            ctx.save()
-            ctx.globalAlpha = waxEffect.opacity
-            ctx.globalCompositeOperation = "multiply"
-
-            // Create pattern
-            const patternCanvas = document.createElement("canvas")
-            const patternCtx = patternCanvas.getContext("2d")
-            if (patternCtx) {
-              patternCanvas.width = waxEffect.size
-              patternCanvas.height = waxEffect.size
-
-              // Draw logo in pattern canvas
-              patternCtx.filter = "grayscale(100%) brightness(150%)"
-              patternCtx.drawImage(waxImg, 0, 0, waxEffect.size, waxEffect.size)
-
-              // Create pattern and fill
-              const pattern = ctx.createPattern(patternCanvas, "repeat")
-              if (pattern) {
-                ctx.save()
-                ctx.translate(canvas.width / 2, canvas.height / 2)
-                ctx.rotate((waxEffect.rotation * Math.PI) / 180)
-                ctx.translate(-canvas.width / 2, -canvas.height / 2)
-                ctx.fillStyle = pattern
-                ctx.fillRect(0, 0, canvas.width, canvas.height)
-                ctx.restore()
-              }
-            }
-
-            ctx.restore()
-            // Continue with main rendering
-            renderMainContent()
-          }
-          waxImg.src = firstLogo.url
-        }
-      } else {
-        renderMainContent()
-      }
+      // Start with main content, then add wax effect on top
+      renderMainContent()
 
       function renderMainContent() {
         // Draw template
@@ -1224,7 +1355,7 @@ export default function EditorPage() {
           let processedLogos = 0
 
           if (sortedLogos.length === 0) {
-            finishDownload()
+            drawWaxEffect()
             return
           }
 
@@ -1247,7 +1378,7 @@ export default function EditorPage() {
 
               processedLogos++
               if (processedLogos === sortedLogos.length) {
-                finishDownload()
+                drawWaxEffect()
               }
             }
             img.src = logo.url!
@@ -1261,6 +1392,69 @@ export default function EditorPage() {
             variant: "destructive",
           })
           setIsDownloading(false)
+        }
+      }
+
+      function drawWaxEffect() {
+        // Draw wax effect if enabled - AFTER all content is rendered
+        if (waxEffect.enabled && logos.length > 0) {
+          const firstLogo = logos.find((l) => l.url)
+          if (firstLogo?.url) {
+            const waxImg = new window.Image()
+            waxImg.crossOrigin = "anonymous"
+            waxImg.onload = () => {
+              console.log("🧪 Wax image loaded for overlay");
+
+              const patternCanvas = document.createElement("canvas")
+              const patternCtx = patternCanvas.getContext("2d")
+
+              if (patternCtx) {
+                console.log("🧪 Drawing wax pattern overlay");
+                patternCanvas.width = waxEffect.size
+                patternCanvas.height = waxEffect.size
+
+                // Clear pattern canvas first
+                patternCtx.clearRect(0, 0, waxEffect.size, waxEffect.size)
+                patternCtx.filter = "grayscale(100%) brightness(150%)"
+                patternCtx.drawImage(waxImg, 0, 0, waxEffect.size, waxEffect.size)
+
+                const pattern = ctx.createPattern(patternCanvas, "repeat")
+                if (pattern) {
+                  ctx.save()
+
+                  // Use multiply blend mode for watermark effect
+                  ctx.globalAlpha = waxEffect.opacity
+                  ctx.globalCompositeOperation = "multiply"
+
+                  // Apply rotation
+                  ctx.translate(canvas.width / 2, canvas.height / 2)
+                  ctx.rotate((waxEffect.rotation * Math.PI) / 180)
+                  ctx.translate(-canvas.width / 2, -canvas.height / 2)
+
+                  ctx.fillStyle = pattern
+                  ctx.fillRect(0, 0, canvas.width, canvas.height)
+                  ctx.restore()
+
+                  console.log("🧪 Wax overlay applied with multiply blend mode");
+                } else {
+                  console.log("❌ Failed to create wax pattern");
+                }
+              } else {
+                console.log("❌ Pattern context is null");
+              }
+
+              finishDownload()
+            }
+            waxImg.onerror = () => {
+              console.error("Failed to load wax image, proceeding without wax effect")
+              finishDownload()
+            }
+            waxImg.src = firstLogo.url
+          } else {
+            finishDownload()
+          }
+        } else {
+          finishDownload()
         }
       }
 
@@ -1598,16 +1792,63 @@ export default function EditorPage() {
     }
   }, [user])
 
-// Auto-save current design state every 30 seconds
+// Prompt user to save when they first start working (has content but no saved design)
+  useEffect(() => {
+    if (user && logos.length > 0 && !currentDesignId && !hasShownInitialSavePrompt && !showSaveDialog) {
+      // User has added logos but hasn't saved yet - prompt them
+      setTimeout(() => {
+        setShowSaveDialog(true)
+        setHasShownInitialSavePrompt(true)
+        toast({
+          title: "Save Your Design",
+          description: "Your design will be auto-saved after you give it a name.",
+        })
+      }, 2000) // Wait 2 seconds after adding first logo
+    }
+  }, [user, logos.length, currentDesignId, hasShownInitialSavePrompt, showSaveDialog])
+
+// Auto-save current design state every 10 seconds if design exists
   useEffect(() => {
     const autoSaveInterval = setInterval(() => {
-      if (selectedTemplate.length > 0 && user && currentDesignId) {
+      console.log("🔄 Auto-save check:", {
+        hasTemplate: selectedTemplate.length > 0,
+        hasUser: !!user,
+        designId: currentDesignId,
+        hasChanges: hasUnsavedChanges
+      })
+
+      if (selectedTemplate.length > 0 && user && currentDesignId && hasUnsavedChanges) {
+        console.log("🔄 Auto-saving design:", currentDesignId)
         saveCurrentDesign(currentDesignName || "Auto-save")
+        setHasUnsavedChanges(false) // Reset unsaved changes flag after auto-save
+      } else {
+        console.log("🔄 Auto-save skipped - conditions not met")
       }
-    }, 10000)
-console.log("currentDesignId" , currentDesignId)
+    }, 10000) // Auto-save every 10 seconds
+
     return () => clearInterval(autoSaveInterval)
-  }, [selectedTemplate, user, currentDesignId, currentDesignName])
+  }, [selectedTemplate, user, currentDesignId, currentDesignName, hasUnsavedChanges])
+
+// Mark design as having unsaved changes when content is modified
+  useEffect(() => {
+    if (currentDesignId) {
+      console.log("📝 Content changed, marking as unsaved:", {
+        designId: currentDesignId,
+        logosCount: logos.length,
+        template: selectedTemplate
+      })
+      setHasUnsavedChanges(true)
+    }
+  }, [logos, selectedTemplate, templateLayer, waxEffect, templateColor, canvasSize])
+
+// Debug logging for key state changes
+  useEffect(() => {
+    console.log("🔍 currentDesignId changed:", currentDesignId)
+  }, [currentDesignId])
+
+  useEffect(() => {
+    console.log("🔍 hasUnsavedChanges changed:", hasUnsavedChanges)
+  }, [hasUnsavedChanges])
 
 // Get CSS filter string for a logo
   const getLogoFilterStyle = (filters: LogoData["filters"]) => {
@@ -1733,14 +1974,30 @@ console.log("currentDesignId" , currentDesignId)
       // Try to save to backend first
       try {
         const BACKEND_URL = process.env.NEXT_PUBLIC_API_URL || "https://mockupgenerator-be.vercel.app"
-        const endpoint = currentDesignId
-            ? `${BACKEND_URL}/api/designs/update?designId=${currentDesignId}`
+
+        // Validate design ID format before sending
+        let isValidId = true
+        if (currentDesignId) {
+          // Check if it's a timestamp-based ID (invalid for most backends)
+          const isTimestamp = /^\d{13}$/.test(currentDesignId)
+          if (isTimestamp) {
+            console.warn("🎨 Detected timestamp-based ID, this might not be valid for your backend:", currentDesignId)
+            isValidId = false
+          }
+        }
+
+        const endpoint = currentDesignId && isValidId
+            ? `${BACKEND_URL}/api/designs/update?designId=${encodeURIComponent(currentDesignId)}`
             : `${BACKEND_URL}/api/designs/create`
 
         console.log("🎨 Saving to:", endpoint)
+        console.log("🎨 Design ID being sent:", currentDesignId)
+        console.log("🎨 Design ID type:", typeof currentDesignId)
+        console.log("🎨 Design ID length:", currentDesignId?.length)
+        console.log("🎨 Is valid ID format:", isValidId)
 
         const response = await fetch(endpoint, {
-          method: currentDesignId ? "PUT" : "POST",
+          method: currentDesignId && isValidId ? "PUT" : "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${getAuthToken()}`,
@@ -1750,19 +2007,38 @@ console.log("currentDesignId" , currentDesignId)
 
         if (!response.ok) {
           const errorData = await response.json()
+          console.error("🎨 API Error Response:", errorData)
+          console.error("🎨 HTTP Status:", response.status)
+          console.error("🎨 Current Design ID that failed:", currentDesignId)
           throw new Error(errorData.message || "Failed to save to server")
         }
 
         const savedDesign = await response.json()
         console.log("🎨 Design saved successfully:", savedDesign)
 
-        // Update current design ID if this was a new design
+        // Update current design ID and name if this was a new design
         if (!currentDesignId) {
-          setCurrentDesignId(savedDesign.id)
+          // Try different response structures
+          const newId = savedDesign.id || savedDesign._id || savedDesign.data?.id || savedDesign.data?._id
+          if (newId) {
+            setCurrentDesignId(newId)
+            setCurrentDesignName(designName)
+            console.log("🎨 New design created with ID:", newId)
+            console.log("🎨 ID format:", typeof newId, "Length:", newId.length)
+            console.log("🎨 currentDesignId state updated, auto-save will now work")
+          } else {
+            console.error("🎨 No ID found in API response:", savedDesign)
+            console.error("🎨 Checked paths: .id, ._id, .data.id, .data._id")
+          }
+        } else {
+          console.log("🎨 Existing design updated, ID:", currentDesignId)
         }
 
         // Reload design history
         await loadDesignHistory()
+
+        // Reset unsaved changes flag after successful save
+        setHasUnsavedChanges(false)
 
         toast({
           title: "Design Saved!",
@@ -1809,7 +2085,13 @@ console.log("currentDesignId" , currentDesignId)
 
         if (!currentDesignId) {
           setCurrentDesignId(fallbackDesign.id)
+          setCurrentDesignName(designName)
+          console.log("🎨 Fallback design created with ID:", fallbackDesign.id)
+          console.log("🎨 currentDesignId state updated via fallback, auto-save will now work")
         }
+
+        // Reset unsaved changes flag after successful save
+        setHasUnsavedChanges(false)
 
         toast({
           title: "Design Saved Locally!",
@@ -1818,14 +2100,7 @@ console.log("currentDesignId" , currentDesignId)
         })
       }
 
-      setCurrentDesignName(designName)
       setShowSaveDialog(false)
-      setHasUnsavedChanges(false) // Reset unsaved changes flag
-
-      toast({
-        title: "Design Saved!",
-        description: `"${designName}" has been saved successfully.`,
-      })
     } catch (error) {
       console.error("🎨 Save failed:", error)
       setSaveError("Failed to save design")
